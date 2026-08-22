@@ -1,0 +1,213 @@
+<Window
+    x:Class="LiangWenPeak.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="梁文峰时钟">
+
+    <Grid
+        x:Name="RootGrid"
+        Background="{StaticResource WindowBackgroundBrush}"
+        Loaded="OnRootLoaded">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="34" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid
+            x:Name="TitleBarRegion"
+            Grid.Row="0"
+            Padding="12,0,5,0"
+            Background="Transparent">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="32" />
+                <ColumnDefinition Width="32" />
+            </Grid.ColumnDefinitions>
+
+            <Grid
+                x:Name="DragRegion"
+                Grid.Column="0"
+                Background="Transparent">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontFamily="Segoe UI Variable Text"
+                    FontSize="13"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource SecondaryTextBrush}"
+                    Text="DeepSeek" />
+            </Grid>
+
+            <Button
+                x:Name="MoreButton"
+                Grid.Column="1"
+                Style="{StaticResource TitleBarIconButtonStyle}"
+                AutomationProperties.Name="更多"
+                ToolTipService.ToolTip="更多">
+                <FontIcon FontSize="15" Glyph="&#xE712;" />
+                <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                        <ToggleMenuFlyoutItem
+                            x:Name="AlwaysOnTopMenuItem"
+                            Click="OnAlwaysOnTopClick"
+                            IsChecked="True"
+                            Text="始终置顶">
+                            <ToggleMenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE718;" />
+                            </ToggleMenuFlyoutItem.Icon>
+                        </ToggleMenuFlyoutItem>
+                        <MenuFlyoutItem
+                            x:Name="RefreshBalanceMenuItem"
+                            Click="OnRefreshBalanceClick"
+                            Text="刷新余额">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE72C;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Click="OnSetApiKeyClick" Text="设置 API Key">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE192;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutSeparator />
+                        <MenuFlyoutItem Click="OnAboutClick" Text="关于">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE946;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Click="OnExitClick" Text="退出">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE8BB;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
+
+            <Button
+                Grid.Column="2"
+                Click="OnCloseClick"
+                Style="{StaticResource TitleBarIconButtonStyle}"
+                AutomationProperties.Name="关闭"
+                ToolTipService.ToolTip="关闭">
+                <FontIcon FontSize="11" Glyph="&#xE8BB;" />
+            </Button>
+        </Grid>
+
+        <Grid Grid.Row="1" Margin="10,0,10,7">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="43" />
+                <RowDefinition Height="30" />
+                <RowDefinition Height="23" />
+                <RowDefinition Height="13" />
+                <RowDefinition Height="32" />
+                <RowDefinition Height="23" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <TextBlock
+                x:Name="CurrentTimeText"
+                Grid.Row="0"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Center"
+                FontFamily="Segoe UI Variable Display"
+                FontSize="36"
+                FontWeight="SemiBold"
+                Foreground="{StaticResource PrimaryTextBrush}"
+                IsTextScaleFactorEnabled="False"
+                LineHeight="42"
+                LineStackingStrategy="BlockLineHeight"
+                TextAlignment="Center"
+                TextTrimming="None"
+                TextWrapping="NoWrap"
+                Typography.NumeralAlignment="Tabular"
+                Text="00:00:00" />
+
+            <TextBlock
+                x:Name="StatusText"
+                Grid.Row="1"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Center"
+                FontFamily="Segoe UI Variable Display"
+                FontSize="23"
+                FontWeight="Bold"
+                Foreground="{StaticResource ValleyBrush}"
+                IsTextScaleFactorEnabled="False"
+                LineHeight="29"
+                LineStackingStrategy="BlockLineHeight"
+                TextAlignment="Center"
+                TextTrimming="None"
+                TextWrapping="NoWrap"
+                Text="梁 文 谷 · 半 价" />
+
+            <TextBlock
+                x:Name="CountdownText"
+                Grid.Row="2"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Center"
+                FontFamily="Segoe UI Variable Text"
+                FontSize="15.5"
+                Foreground="{StaticResource SecondaryTextBrush}"
+                IsTextScaleFactorEnabled="False"
+                LineHeight="22"
+                LineStackingStrategy="BlockLineHeight"
+                TextAlignment="Center"
+                TextTrimming="None"
+                TextWrapping="NoWrap"
+                Typography.NumeralAlignment="Tabular"
+                Text="距离梁文峰还有 00:00:00" />
+
+            <Border
+                Grid.Row="3"
+                Height="1"
+                Margin="0,6,0,6"
+                VerticalAlignment="Center"
+                Background="{StaticResource DividerBrush}" />
+
+            <Grid Grid.Row="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource DataLabelStyle}" Text="API 余额" />
+                <Grid
+                    Grid.Column="1"
+                    HorizontalAlignment="Right">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock
+                        x:Name="BalanceText"
+                        Style="{StaticResource DataValueStyle}"
+                        Text="未配置" />
+                    <TextBlock
+                        x:Name="UpdateStatusText"
+                        Grid.Row="1"
+                        HorizontalAlignment="Right"
+                        FontFamily="Segoe UI Variable Text"
+                        FontSize="10"
+                        Foreground="{StaticResource TertiaryTextBrush}"
+                        LineHeight="12"
+                        LineStackingStrategy="BlockLineHeight"
+                        Text=""
+                        TextAlignment="Right"
+                        TextTrimming="None"
+                        TextWrapping="NoWrap" />
+                </Grid>
+            </Grid>
+
+            <Grid Grid.Row="5">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Style="{StaticResource DataLabelStyle}" Text="下一时段" />
+                <TextBlock
+                    x:Name="NextPeriodText"
+                    Grid.Column="1"
+                    Style="{StaticResource DataValueStyle}"
+                    Text="09:00 — 12:00" />
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

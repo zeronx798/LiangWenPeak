@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Pricing">
+      <UniqueIdentifier>{676FF3F7-4786-4380-B780-8CBCE363C982}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Time">
+      <UniqueIdentifier>{0C744E02-02F3-4FDC-9E32-C4D41A49493A}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Pricing\PricingScheduleService.h">
+      <Filter>Pricing</Filter>
+    </ClInclude>
+    <ClInclude Include="Time\BalanceRefreshSchedule.h">
+      <Filter>Time</Filter>
+    </ClInclude>
+    <ClInclude Include="Time\BeijingTime.h">
+      <Filter>Time</Filter>
+    </ClInclude>
+    <ClInclude Include="Time\TimeFormatter.h">
+      <Filter>Time</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Pricing\PricingScheduleService.cpp">
+      <Filter>Pricing</Filter>
+    </ClCompile>
+    <ClCompile Include="Time\BalanceRefreshSchedule.cpp">
+      <Filter>Time</Filter>
+    </ClCompile>
+    <ClCompile Include="Time\BeijingTime.cpp">
+      <Filter>Time</Filter>
+    </ClCompile>
+    <ClCompile Include="Time\TimeFormatter.cpp">
+      <Filter>Time</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

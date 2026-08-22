@@ -1,0 +1,42 @@
+.vs/
+.vscode/
+ipch/
+build/
+dist/
+artifacts/
+packages/
+**/Generated Files/
+**/obj/
+**/bin/
+
+# MSVC and WinUI generated output
+*.exe
+*.dll
+*.pdb
+*.lib
+*.exp
+*.ilk
+*.obj
+*.pch
+*.tlog
+*.lastbuildstate
+*.xbf
+*.pri
+*.winmd
+
+# Visual Studio per-user state
+*.VC.db
+*.VC.VC.opendb
+*.user
+*.suo
+
+# Local logs and editor/OS temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+Thumbs.db
+Desktop.ini
+.DS_Store
