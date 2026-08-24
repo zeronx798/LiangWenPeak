@@ -23,6 +23,7 @@ namespace winrt::LiangWenPeak::implementation
         void InitializeOwned(
             HWND owner,
             liangwenpeak::balance::ApiSettingsDraft draft,
+            bool fluentThemeEnabled,
             SaveCallback saveCallback,
             ResetCallback resetCallback,
             ClosedCallback closedCallback);
@@ -59,6 +60,7 @@ namespace winrt::LiangWenPeak::implementation
 
     private:
         void ConfigureWindow();
+        void ApplyTheme();
         void BringToFront();
         void PopulateControls();
         void PopulateRateWindows();
@@ -85,6 +87,7 @@ namespace winrt::LiangWenPeak::implementation
         Microsoft::UI::Windowing::AppWindow m_appWindow{ nullptr };
         winrt::event_token m_closedToken{};
         bool m_suppressEvents = false;
+        bool m_fluentThemeEnabled = false;
         bool m_ownerDisabled = false;
         bool m_closingFromOwner = false;
         bool m_closed = false;

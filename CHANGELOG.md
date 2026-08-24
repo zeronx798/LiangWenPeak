@@ -1,5 +1,29 @@
 # 更新日志
 
+## 1.1.1
+
+新增 Windows 11 Fluent Theme 视觉适配。
+
+### 亮点
+
+* Windows 11 默认启用“Fluent 主题”，可从主窗口菜单随时关闭并持久化选择
+* Windows 10 完全隐藏主题菜单项，保持原有深蓝纯色窗口与功能行为
+* 主窗口和 API Key 设置窗口适配 Windows 11 圆角、原生焦点视觉及 WinUI 控件样式
+* 菜单继续使用 WinUI `FontIcon` 矢量图标，不使用 Emoji、Mica、Acrylic 或透明背景
+* 设置窗口的余额预测开关升级为原生 `ToggleSwitch`，不改变保存、取消和草稿状态模型
+* About 页面精简为项目名称、GitHub 项目链接、Apache License 2.0 许可证和版本号
+* Fluent Theme 逻辑保持在 App UI 层，不影响 API、余额历史、预测算法或 Core Library
+
+### 下载
+
+`LiangWenPeak-1.1.1-windows-x64.zip`
+
+SHA256：
+
+```text
+121B0000D0B018A810EED4AF6056F76137CB97DB0457964820F0A96AD1648ECD
+```
+
 ## 1.1.0
 
 新增本地余额统计与预测。

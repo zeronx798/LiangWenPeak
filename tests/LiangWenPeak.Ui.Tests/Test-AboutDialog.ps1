@@ -316,11 +316,11 @@ try {
         [PSCustomObject]@{ Name = $aboutLabel; Type = [Windows.Automation.ControlType]::Text },
         [PSCustomObject]@{ Name = 'LiangWenPeak'; Type = [Windows.Automation.ControlType]::Text },
         [PSCustomObject]@{
-            Name = (([char]0x6881).ToString() + [char]0x6587 + [char]0x5CF0 + [char]0x65F6 + [char]0x949F)
-            Type = [Windows.Automation.ControlType]::Text
+            Name = 'zeronx798/LiangWenPeak'
+            Type = [Windows.Automation.ControlType]::Hyperlink
         },
         [PSCustomObject]@{
-            Name = (([char]0x5317).ToString() + [char]0x4EAC + [char]0x65F6 + [char]0x95F4 + [char]0x5CF0 + [char]0x8C37 + [char]0x72B6 + [char]0x6001 + [char]0x4EEA + [char]0x8868)
+            Name = 'Licensed under Apache License 2.0'
             Type = [Windows.Automation.ControlType]::Text
         },
         [PSCustomObject]@{
@@ -335,13 +335,22 @@ try {
 
     $during = Get-WindowRectangle $windowHandle
     if (-not (Test-SameRectangle $before $during)) {
-        throw "Opening About changed the main window rectangle from $($before.Left),$($before.Top),$($before.Right),$($before.Bottom) to $($during.Left),$($during.Top),$($during.Right),$($during.Bottom)."
+        $expectedObservationGrowth = [int][Math]::Floor((13 * $actualDpi + 48) / 96)
+        $observationBecameVisible =
+            $before.Left -eq $during.Left -and
+            $before.Top -eq $during.Top -and
+            $before.Right -eq $during.Right -and
+            ($during.Bottom - $before.Bottom) -eq $expectedObservationGrowth
+        if (-not $observationBecameVisible) {
+            throw "Opening About changed the main window rectangle from $($before.Left),$($before.Top),$($before.Right),$($before.Bottom) to $($during.Left),$($during.Top),$($during.Right),$($during.Bottom)."
+        }
+        $before = $during
     }
 
     $scalePercent = [int][Math]::Round($actualDpi / 96.0 * 100)
     $screenshotName = "about-dialog-$scalePercent`pct"
     $screenshotPath = & (Join-Path $repositoryRoot 'scripts\ui-validation\Capture-Window.ps1') `
-        -ProcessName 'LiangWenPeak.App' `
+        -WindowHandle $windowHandle `
         -Name $screenshotName
 
     $foundElements = @{}
@@ -356,6 +365,33 @@ try {
         }
         Assert-ElementInsideWindow -Element $element -WindowRectangle $during -Name $expectedElement.Name
         $foundElements[$expectedElement.Name] = $element
+    }
+
+    $removedText = @(
+        (([char]0x6881).ToString() + [char]0x6587 + [char]0x5CF0 + [char]0x65F6 + [char]0x949F),
+        (([char]0x5317).ToString() + [char]0x4EAC + [char]0x65F6 + [char]0x95F4 + [char]0x5CF0 + [char]0x8C37 + [char]0x72B6 + [char]0x6001 + [char]0x4EEA + [char]0x8868)
+    )
+    foreach ($removedName in $removedText) {
+        $removedCondition = [Windows.Automation.AndCondition]::new(
+            [Windows.Automation.PropertyCondition]::new(
+                [Windows.Automation.AutomationElement]::NameProperty,
+                $removedName),
+            [Windows.Automation.PropertyCondition]::new(
+                [Windows.Automation.AutomationElement]::ControlTypeProperty,
+                [Windows.Automation.ControlType]::Text))
+        if ($null -ne $root.FindFirst(
+                [Windows.Automation.TreeScope]::Descendants,
+                $removedCondition)) {
+            throw "Removed About text '$removedName' is still exposed."
+        }
+    }
+
+    $repositoryLink = $foundElements['zeronx798/LiangWenPeak']
+    $invokePattern = $null
+    if (-not $repositoryLink.TryGetCurrentPattern(
+            [Windows.Automation.InvokePattern]::Pattern,
+            [ref]$invokePattern)) {
+        throw 'The GitHub repository hyperlink does not expose the native Invoke pattern.'
     }
 
     $closeLabel = ([char]0x5173).ToString() + [char]0x95ED

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ApiSettingsWindow.xaml.h"
+#include "AppTheme/ThemeManager.h"
 #include "MainWindow.g.h"
 #include "Balance/BalanceModels.h"
 #include "ViewModels/MainViewModel.h"
@@ -19,6 +20,7 @@ namespace winrt::LiangWenPeak::implementation
         void OnClockTick(Windows::Foundation::IInspectable const& sender, Windows::Foundation::IInspectable const& args);
         void OnBalanceTimerTick(Microsoft::UI::Dispatching::DispatcherQueueTimer const& sender, Windows::Foundation::IInspectable const& args);
         void OnAlwaysOnTopClick(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnFluentThemeClick(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnRefreshBalanceClick(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnForecastToggleClick(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnSetApiKeyClick(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& args);
@@ -28,6 +30,7 @@ namespace winrt::LiangWenPeak::implementation
 
     private:
         void ConfigureWindow();
+        void ApplyTheme();
         void ApplyWindowPresentation();
         void ArmFirstFrameReveal();
         void RevealFirstFrame() noexcept;
@@ -52,6 +55,7 @@ namespace winrt::LiangWenPeak::implementation
         void OnWindowClosing(Microsoft::UI::Windowing::AppWindow const& sender, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& args);
 
         std::shared_ptr<liangwenpeak::viewmodels::MainViewModel> m_viewModel;
+        liangwenpeak::apptheme::ThemeManager m_themeManager;
         winrt::com_ptr<ApiSettingsWindow> m_apiSettingsWindow;
         HWND m_windowHandle{};
         Microsoft::UI::Windowing::AppWindow m_appWindow{ nullptr };

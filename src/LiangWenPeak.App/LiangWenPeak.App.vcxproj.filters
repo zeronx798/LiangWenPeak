@@ -10,6 +10,9 @@
     <Filter Include="ViewModels">
       <UniqueIdentifier>{E42C3E8A-E6D9-4577-91C1-A6E4270F0702}</UniqueIdentifier>
     </Filter>
+    <Filter Include="AppTheme">
+      <UniqueIdentifier>{A5EFF880-B803-4743-BC58-06B8C579E73D}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Configuration">
       <UniqueIdentifier>{A6673ADF-36A5-4F19-BC08-6A50F503D1ED}</UniqueIdentifier>
     </Filter>
@@ -44,6 +47,15 @@
     <ClInclude Include="pch.h">
       <Filter>Configuration</Filter>
     </ClInclude>
+    <ClInclude Include="AppTheme\FluentThemeService.h">
+      <Filter>AppTheme</Filter>
+    </ClInclude>
+    <ClInclude Include="AppTheme\ThemeManager.h">
+      <Filter>AppTheme</Filter>
+    </ClInclude>
+    <ClInclude Include="AppTheme\WindowsVersionDetector.h">
+      <Filter>AppTheme</Filter>
+    </ClInclude>
     <ClInclude Include="Services\CredentialService.h">
       <Filter>Services</Filter>
     </ClInclude>
@@ -75,6 +87,15 @@
     </ClCompile>
     <ClCompile Include="pch.cpp">
       <Filter>Configuration</Filter>
+    </ClCompile>
+    <ClCompile Include="AppTheme\FluentThemeService.cpp">
+      <Filter>AppTheme</Filter>
+    </ClCompile>
+    <ClCompile Include="AppTheme\ThemeManager.cpp">
+      <Filter>AppTheme</Filter>
+    </ClCompile>
+    <ClCompile Include="AppTheme\WindowsVersionDetector.cpp">
+      <Filter>AppTheme</Filter>
     </ClCompile>
     <ClCompile Include="Services\CredentialService.cpp">
       <Filter>Services</Filter>

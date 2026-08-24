@@ -40,7 +40,18 @@ LiangWenPeak 是一个非官方 Windows 桌面状态仪表，用北京时间展�
 - 异步调用 DeepSeek balance endpoint
 - 使用 Credential Locker 保存 API Key 与历史身份密钥
 - 使用当前用户注册表保存非敏感普通设置
+- 检测 Windows 版本并管理 Windows 11 Fluent Theme 状态
 - 按真实时钟安排下一次自动刷新，并驱动动态窗口布局
+
+#### Fluent Theme 与 Windows 版本
+
+Fluent Theme 是 `src/LiangWenPeak.App/AppTheme/` 中的纯 UI 能力，不进入 Core。`WindowsVersionDetector` 通过 `RtlGetVersion` 读取真实系统版本，Windows 11 的最低识别边界为 build `22000`，不依赖可能受 application manifest 影响的版本辅助宏。
+
+Windows 11 显示“Fluent 主题”菜单项，首次运行默认开启；用户选择以 `FluentThemeEnabled` DWORD 保存在 `HKCU\Software\LiangWenPeak`。开启时，`ThemeManager` 为 MainWindow 和 API settings window 应用 Windows 11 圆角窗口、与深蓝背景协调的 DWM 边框、WinUI 原生控件圆角及系统焦点视觉。MenuFlyout、Button、PasswordBox、TextBox、ComboBox 和 ToggleSwitch 继续使用 WinUI 官方模板、ThemeResource、hover、pressed 与 focus visual state，不自绘控件。
+
+Windows 10 不创建可见入口：菜单项保持 `Collapsed`，不是 disabled item，也不显示“不可用”说明。持久化值不能绕过系统版本检测。Windows 10 和关闭 Fluent Theme 的 Windows 11 仍使用深蓝纯色背景与原生 WinUI 控件，但回退为方角呈现。
+
+主题切换不改变主窗口宽度、高度模型、内容结构或数据绑定，也不触碰 API 请求、Credential Locker、Settings DraftState、余额历史、Series ID、采样调度和预测算法。应用明确不使用 Mica、Acrylic、SystemBackdrop 或其它半透明材质。
 
 ### LiangWenPeak.Launcher
 
@@ -342,6 +353,7 @@ Native C++ tests 覆盖：
 - DraftState、Key clear/undo/replace、window constraint 和 preferred/effective algorithm
 - CSV append/load、truncated tail repair、中间损坏归档、rollover、rollback 和 deployment path
 - MainWindow 三状态动态高度、更新时间 row 与 bottom padding 模型
+- Windows 10/11 build 边界与 Fluent Theme 可用性分类
 
 PowerShell tests 覆盖：
 
@@ -350,6 +362,7 @@ PowerShell tests 覆盖：
 - 本地 `data/` sentinel 在 clean/publish 后保持不变，且不泄漏到 ZIP
 - staged Launcher smoke test 和 portable payload 验证
 - MainWindow 动态高度、更新时间边界、settings owned/topmost/activation、控件 gutter 和 owner close
+- Windows 11 Fluent Theme 菜单默认状态、开关切换与持久化；Windows 10 菜单隐藏路径
 - About dialog 与主窗口尺寸稳定性
 - 100%、125%、150%、200% DPI 下的 UI layout 验证
 
@@ -368,6 +381,6 @@ PowerShell tests 覆盖：
 - Auto updater
 - MSIX 或 installer
 - System tray
-- 大型 theme 或 i18n overhaul
+- Mica、Acrylic、透明桌面组件或大型 theme/i18n overhaul
 
 余额统计仅根据官方 balance endpoint 的固定采样变化估计消耗，不代理 API 请求，也不重建 Token 或账单明细。

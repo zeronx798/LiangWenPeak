@@ -114,6 +114,9 @@
     </ClInclude>
     <ClInclude Include="MainWindowLayout.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="AppTheme\FluentThemeService.h" />
+    <ClInclude Include="AppTheme\ThemeManager.h" />
+    <ClInclude Include="AppTheme\WindowsVersionDetector.h" />
     <ClInclude Include="Services\CredentialService.h" />
     <ClInclude Include="Services\DeepSeekClient.h" />
     <ClInclude Include="Services\DeploymentPathService.h" />
@@ -134,6 +137,9 @@
     <ClCompile Include="MainWindow.xaml.cpp">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="AppTheme\FluentThemeService.cpp" />
+    <ClCompile Include="AppTheme\ThemeManager.cpp" />
+    <ClCompile Include="AppTheme\WindowsVersionDetector.cpp" />
     <ClCompile Include="Services\CredentialService.cpp" />
     <ClCompile Include="Services\DeepSeekClient.cpp" />
     <ClCompile Include="Services\DeploymentPathService.cpp" />

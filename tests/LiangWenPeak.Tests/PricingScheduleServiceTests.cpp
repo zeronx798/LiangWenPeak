@@ -3,6 +3,7 @@
 #include "Time/BeijingTime.h"
 #include "Time/TimeFormatter.h"
 #include "BalanceStatisticsTests.h"
+#include "AppTheme/WindowsVersionDetector.h"
 #include "MainWindowLayout.h"
 
 #include <chrono>
@@ -356,6 +357,27 @@ namespace
                 "visible update text ends above the required client-area bottom padding");
         }
     }
+
+    void VerifyWindowsVersionClassification(TestRunner& tests)
+    {
+        using liangwenpeak::apptheme::WindowsVersionDetector;
+
+        tests.Expect(
+            !WindowsVersionDetector::IsWindows11Version(10, 19045),
+            "Windows 10 build 19045 does not expose Fluent theme");
+        tests.Expect(
+            !WindowsVersionDetector::IsWindows11Version(10, 21999),
+            "the build immediately below Windows 11 stays unsupported");
+        tests.Expect(
+            WindowsVersionDetector::IsWindows11Version(10, 22000),
+            "Windows 11 build 22000 exposes Fluent theme");
+        tests.Expect(
+            WindowsVersionDetector::IsWindows11Version(10, 26100),
+            "current Windows 11 builds expose Fluent theme");
+        tests.Expect(
+            WindowsVersionDetector::IsWindows11Version(11, 0),
+            "a future Windows major version remains supported");
+    }
 }
 
 int main()
@@ -370,6 +392,7 @@ int main()
     VerifyFormatting(tests);
     VerifyBalanceRefreshAlignment(tests);
     VerifyMainWindowLayout(tests);
+    VerifyWindowsVersionClassification(tests);
     VerifyBalanceStatistics([&tests](bool const condition, std::string_view const name)
     {
         tests.Expect(condition, name);
@@ -377,7 +400,7 @@ int main()
 
     if (tests.FailureCount() == 0)
     {
-        std::cout << "All pricing, formatting, scheduling, layout, history, forecast, and ETA tests passed.\n";
+        std::cout << "All pricing, formatting, scheduling, layout, platform, history, forecast, and ETA tests passed.\n";
     }
     else
     {
