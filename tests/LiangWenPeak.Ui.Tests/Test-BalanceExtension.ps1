@@ -236,6 +236,7 @@ $apiBurnLabel = 'API ' + [char]0x6D88 + [char]0x8017
 $etaLabel = ([char]0x9884).ToString() + [char]0x8BA1 + [char]0x89E6 + [char]0x5E95
 $settingsTitle = 'API Key ' + [char]0x529F + [char]0x80FD
 $settingsMenuLabel = $settingsTitle + '...'
+$fluentThemeLabel = 'Fluent ' + [char]0x4E3B + [char]0x9898
 $settingsScrollRegionLabel = 'API ' + [char]0x8BBE + [char]0x7F6E +
     [char]0x6EDA + [char]0x52A8 + [char]0x533A + [char]0x57DF
 $undoLabel = ([char]0x64A4).ToString() + [char]0x9500
@@ -332,6 +333,33 @@ function Find-InvokableElementByName(
         }
         if ($null -ne $offscreenCandidate) {
             return $offscreenCandidate
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $null
+}
+
+function Find-ToggleElementByName(
+    [Windows.Automation.AutomationElement]$Root,
+    [string]$Name,
+    [int]$TimeoutMilliseconds = 5000) {
+
+    $condition = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::NameProperty,
+        $Name)
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    do {
+        $elements = $Root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+        for ($index = 0; $index -lt $elements.Count; ++$index) {
+            $candidate = $elements.Item($index)
+            $togglePattern = $null
+            if ($candidate.Current.IsEnabled -and
+                -not $candidate.Current.IsOffscreen -and
+                $candidate.TryGetCurrentPattern(
+                    [Windows.Automation.TogglePattern]::Pattern,
+                    [ref]$togglePattern)) {
+                return $candidate
+            }
         }
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
@@ -602,10 +630,6 @@ $sourceApplicationPath = Join-Path $context.BuildOutput 'LiangWenPeak.App.exe'
 if (-not (Test-Path -LiteralPath $sourceApplicationPath -PathType Leaf)) {
     throw "Application build output was not found: $sourceApplicationPath"
 }
-if (Get-Process -Name LiangWenPeak.App -ErrorAction SilentlyContinue) {
-    throw 'Close existing LiangWenPeak.App instances before running the UI test.'
-}
-
 $testRoot = Join-Path $repositoryRoot 'build\ui-tests\balance-extension'
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 $testRootBoundary = [IO.Path]::GetFullPath($testRoot).TrimEnd(
@@ -652,6 +676,10 @@ try {
     }
 
     Set-TestSettings -ApiEnabled $true -ForecastEnabled $false
+    Remove-ItemProperty `
+        -Path 'HKCU:\Software\LiangWenPeak' `
+        -Name FluentThemeEnabled `
+        -ErrorAction SilentlyContinue
     $application = Start-TestApplication $applicationPath $applicationDirectory
     try {
         $mainHandle = $application.MainWindowHandle
@@ -683,6 +711,51 @@ try {
             throw 'More menu button was not found.'
         }
         Invoke-Element $more
+        $windowsBuild = [int](Get-ItemPropertyValue `
+            -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' `
+            -Name CurrentBuildNumber)
+        $fluentTheme = Find-ToggleElementByName `
+            ([Windows.Automation.AutomationElement]::RootElement) `
+            $fluentThemeLabel `
+            $(if ($windowsBuild -ge 22000) { 5000 } else { 500 })
+        if ($windowsBuild -ge 22000) {
+            if ($null -eq $fluentTheme) {
+                throw 'Windows 11 did not expose the Fluent theme menu item.'
+            }
+            $toggle = $fluentTheme.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
+            if ($toggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::On) {
+                throw 'Fluent theme was not enabled by default on Windows 11.'
+            }
+            $toggle.Toggle()
+            Start-Sleep -Milliseconds 150
+            if ((Get-ItemPropertyValue `
+                    -Path 'HKCU:\Software\LiangWenPeak' `
+                    -Name FluentThemeEnabled) -ne 0) {
+                throw 'Disabling Fluent theme was not persisted.'
+            }
+
+            Invoke-Element $more
+            $fluentTheme = Find-ToggleElementByName `
+                ([Windows.Automation.AutomationElement]::RootElement) `
+                $fluentThemeLabel
+            if ($null -eq $fluentTheme) {
+                throw 'Fluent theme menu item disappeared after it was disabled.'
+            }
+            $toggle = $fluentTheme.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
+            if ($toggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off) {
+                throw 'Fluent theme did not switch off in the UI.'
+            }
+            $toggle.Toggle()
+            Start-Sleep -Milliseconds 150
+            if ((Get-ItemPropertyValue `
+                    -Path 'HKCU:\Software\LiangWenPeak' `
+                    -Name FluentThemeEnabled) -ne 1) {
+                throw 'Re-enabling Fluent theme was not persisted.'
+            }
+            Invoke-Element $more
+        } elseif ($null -ne $fluentTheme) {
+            throw 'Windows 10 exposed the Fluent theme menu item instead of hiding it.'
+        }
         $settingsMenu = Find-InvokableElementByName `
             ([Windows.Automation.AutomationElement]::RootElement) `
             $settingsMenuLabel
@@ -750,6 +823,20 @@ try {
             }
             Assert-ElementInsideWindow $control $settingsRectangle $automationId
             Assert-ElementRightGutter $control $scrollRegion $ExpectedDpi $automationId
+        }
+
+        foreach ($toggleId in @('ApiFeatureToggle', 'ForecastEnabledBox')) {
+            $toggleControl = Find-Element `
+                $settingsWindow `
+                ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+                $toggleId
+            $togglePattern = $null
+            if ($null -eq $toggleControl -or
+                -not $toggleControl.TryGetCurrentPattern(
+                    [Windows.Automation.TogglePattern]::Pattern,
+                    [ref]$togglePattern)) {
+                throw "Settings control '$toggleId' is not an accessible native ToggleSwitch."
+            }
         }
 
         foreach ($automationId in @(
@@ -868,9 +955,18 @@ try {
     Write-Host "PASS: balance extension UI at $([int]($ExpectedDpi / 96 * 100))% DPI"
     Write-Host 'Main window client heights: 173; 200/213; 246/259 DIP (update hidden/visible)'
 } finally {
-    Get-Process -Name LiangWenPeak.App -ErrorAction SilentlyContinue | ForEach-Object {
-        try { $_.Kill(); $_.WaitForExit() } catch {}
-    }
+    Get-Process -Name LiangWenPeak.App -ErrorAction SilentlyContinue |
+        Where-Object {
+            try {
+                $processPath = [IO.Path]::GetFullPath($_.Path)
+                $processPath.StartsWith($testRootBoundary, [StringComparison]::OrdinalIgnoreCase)
+            } catch {
+                $false
+            }
+        } |
+        ForEach-Object {
+            try { $_.Kill(); $_.WaitForExit() } catch {}
+        }
     & reg.exe delete $settingsKey /f 2>$null | Out-Null
     if ($settingsExisted) {
         & reg.exe import $registryBackup | Out-Null

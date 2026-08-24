@@ -8,6 +8,7 @@
 
 #include <dwmapi.h>
 #include <shellscalingapi.h>
+#include <winrt/Microsoft.UI.Xaml.Documents.h>
 
 #include "Services/CredentialService.h"
 #include "Services/DeepSeekClient.h"
@@ -28,6 +29,7 @@ namespace winrt::LiangWenPeak::implementation
     using namespace Microsoft::UI::Windowing;
     using namespace Microsoft::UI::Xaml;
     using namespace Microsoft::UI::Xaml::Controls;
+    using namespace Microsoft::UI::Xaml::Documents;
     using namespace Microsoft::UI::Xaml::Media;
     using namespace Windows::Foundation;
 
@@ -110,6 +112,7 @@ namespace winrt::LiangWenPeak::implementation
                 winrt::box_value(L"ContentDialogPadding"),
                 winrt::box_value(Thickness{ 16.0, 12.0, 16.0, 12.0 }));
         }
+
     }
 
     MainWindow::MainWindow()
@@ -130,6 +133,7 @@ namespace winrt::LiangWenPeak::implementation
             std::move(historyStore));
 
         ConfigureWindow();
+        ApplyTheme();
         m_viewModel->Initialize();
         ApplyWindowPresentation();
         ApplyState();
@@ -197,6 +201,23 @@ namespace winrt::LiangWenPeak::implementation
         m_presenter.IsAlwaysOnTop(item.IsChecked());
     }
 
+    void MainWindow::OnFluentThemeClick(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        const auto item = sender.as<ToggleMenuFlyoutItem>();
+        if (!m_themeManager.IsFluentThemeAvailable())
+        {
+            item.Visibility(Visibility::Collapsed);
+            return;
+        }
+
+        if (!m_themeManager.SetFluentThemeEnabled(item.IsChecked()))
+        {
+            item.IsChecked(m_themeManager.IsFluentThemeEnabled());
+            return;
+        }
+        ApplyTheme();
+    }
+
     void MainWindow::OnRefreshBalanceClick(IInspectable const&, RoutedEventArgs const&)
     {
         RefreshBalanceAsync(liangwenpeak::balance::BalanceRefreshReason::ManualObservation);
@@ -245,12 +266,26 @@ namespace winrt::LiangWenPeak::implementation
         const auto windowNative = this->try_as<::IWindowNative>();
         winrt::check_hresult(windowNative->get_WindowHandle(&m_windowHandle));
 
-        const BOOL darkMode = TRUE;
-        ::DwmSetWindowAttribute(m_windowHandle, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
-        const DWM_WINDOW_CORNER_PREFERENCE corners = DWMWCP_ROUND;
-        ::DwmSetWindowAttribute(m_windowHandle, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
-
         m_closingToken = m_appWindow.Closing({ this, &MainWindow::OnWindowClosing });
+    }
+
+    void MainWindow::ApplyTheme()
+    {
+        const bool available = m_themeManager.IsFluentThemeAvailable();
+        const bool enabled = m_themeManager.IsFluentThemeEnabled();
+        FluentThemeMenuItem().Visibility(available ? Visibility::Visible : Visibility::Collapsed);
+        FluentThemeMenuItem().IsChecked(enabled);
+
+        m_themeManager.ApplyToWindow(RootGrid(), m_windowHandle);
+        liangwenpeak::apptheme::ThemeManager::ApplyControlPresentation(
+            MoreButton(),
+            enabled);
+        liangwenpeak::apptheme::ThemeManager::ApplyControlPresentation(
+            CloseButton(),
+            enabled);
+        MainMenuFlyout().MenuFlyoutPresenterStyle(
+            liangwenpeak::apptheme::ThemeManager::CreateMenuFlyoutPresenterStyle(
+                enabled));
     }
 
     void MainWindow::ApplyWindowPresentation()
@@ -521,6 +556,7 @@ namespace winrt::LiangWenPeak::implementation
         window->InitializeOwned(
             m_windowHandle,
             m_viewModel->CreateSettingsDraft(),
+            m_themeManager.IsFluentThemeEnabled(),
             [weak](
                 liangwenpeak::balance::BalanceSettings settings,
                 liangwenpeak::balance::ApiKeyDraftAction const keyAction,
@@ -578,7 +614,6 @@ namespace winrt::LiangWenPeak::implementation
         {
             const auto resources = Application::Current().Resources();
             const auto primaryBrush = resources.Lookup(winrt::box_value(L"PrimaryTextBrush")).as<Brush>();
-            const auto secondaryBrush = resources.Lookup(winrt::box_value(L"SecondaryTextBrush")).as<Brush>();
             const auto tertiaryBrush = resources.Lookup(winrt::box_value(L"TertiaryTextBrush")).as<Brush>();
 
             TextBlock applicationName;
@@ -588,17 +623,22 @@ namespace winrt::LiangWenPeak::implementation
             applicationName.Foreground(primaryBrush);
             applicationName.TextWrapping(TextWrapping::Wrap);
 
-            TextBlock chineseName;
-            chineseName.Text(L"\u6881\u6587\u5cf0\u65f6\u949f");
-            chineseName.FontSize(14);
-            chineseName.Foreground(secondaryBrush);
-            chineseName.TextWrapping(TextWrapping::Wrap);
+            TextBlock repository;
+            repository.FontSize(12);
+            repository.TextWrapping(TextWrapping::Wrap);
 
-            TextBlock description;
-            description.Text(L"\u5317\u4eac\u65f6\u95f4\u5cf0\u8c37\u72b6\u6001\u4eea\u8868");
-            description.FontSize(13);
-            description.Foreground(secondaryBrush);
-            description.TextWrapping(TextWrapping::Wrap);
+            Hyperlink repositoryLink;
+            repositoryLink.NavigateUri(Uri{ L"https://github.com/zeronx798/LiangWenPeak" });
+            Run repositoryName;
+            repositoryName.Text(L"zeronx798/LiangWenPeak");
+            repositoryLink.Inlines().Append(repositoryName);
+            repository.Inlines().Append(repositoryLink);
+
+            TextBlock license;
+            license.Text(L"Licensed under Apache License 2.0");
+            license.FontSize(12);
+            license.Foreground(tertiaryBrush);
+            license.TextWrapping(TextWrapping::Wrap);
 
             TextBlock version;
             version.Text(winrt::hstring{ std::wstring{ L"\u7248\u672c " } + kApplicationVersion });
@@ -616,12 +656,12 @@ namespace winrt::LiangWenPeak::implementation
                 content.RowDefinitions().Append(row);
             }
 
-            Grid::SetRow(chineseName, 1);
-            Grid::SetRow(description, 2);
+            Grid::SetRow(repository, 1);
+            Grid::SetRow(license, 2);
             Grid::SetRow(version, 3);
             content.Children().Append(applicationName);
-            content.Children().Append(chineseName);
-            content.Children().Append(description);
+            content.Children().Append(repository);
+            content.Children().Append(license);
             content.Children().Append(version);
 
             ContentDialog dialog;

@@ -6,6 +6,7 @@
 #endif
 
 #include "Time/BalanceRefreshSchedule.h"
+#include "AppTheme/ThemeManager.h"
 
 #include <algorithm>
 #include <iomanip>
@@ -110,16 +111,19 @@ namespace winrt::LiangWenPeak::implementation
     void ApiSettingsWindow::InitializeOwned(
         HWND const owner,
         liangwenpeak::balance::ApiSettingsDraft draft,
+        bool const fluentThemeEnabled,
         SaveCallback saveCallback,
         ResetCallback resetCallback,
         ClosedCallback closedCallback)
     {
         m_owner = owner;
+        m_fluentThemeEnabled = fluentThemeEnabled;
         m_draft.emplace(std::move(draft));
         m_saveCallback = std::move(saveCallback);
         m_resetCallback = std::move(resetCallback);
         m_closedCallback = std::move(closedCallback);
         ConfigureWindow();
+        ApplyTheme();
         PopulateControls();
     }
 
@@ -253,7 +257,7 @@ namespace winrt::LiangWenPeak::implementation
             return;
         }
         m_draft->Settings().apiFeatureEnabled = ApiFeatureToggle().IsOn();
-        m_draft->Settings().forecastEnabled = ForecastEnabledBox().IsChecked().Value();
+        m_draft->Settings().forecastEnabled = ForecastEnabledBox().IsOn();
         m_draft->Settings().selectedCurrency = SelectedCurrency();
         if (!m_saveCallback
             || !m_saveCallback(m_draft->Settings(), m_draft->KeyAction(), ApiKeyBox().Password()))
@@ -346,6 +350,28 @@ namespace winrt::LiangWenPeak::implementation
         m_closedToken = Closed({ this, &ApiSettingsWindow::OnWindowClosed });
     }
 
+    void ApiSettingsWindow::ApplyTheme()
+    {
+        using liangwenpeak::apptheme::ThemeManager;
+
+        ThemeManager::ApplyWindowPresentation(
+            RootGrid(),
+            m_windowHandle,
+            m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(ClearApiKeyButton(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(ResetStatisticsButton(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(SaveButton(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(CancelButton(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(ApiKeyBox(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(WarningBalanceBox(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(CurrencyBox(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(RefreshIntervalBox(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(RateWindowBox(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(AlgorithmBox(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(ApiFeatureToggle(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(ForecastEnabledBox(), m_fluentThemeEnabled);
+    }
+
     void ApiSettingsWindow::BringToFront()
     {
         if (m_windowHandle == nullptr || !::IsWindow(m_windowHandle))
@@ -374,7 +400,7 @@ namespace winrt::LiangWenPeak::implementation
         }
         m_suppressEvents = true;
         ApiFeatureToggle().IsOn(m_draft->Settings().apiFeatureEnabled);
-        ForecastEnabledBox().IsChecked(m_draft->Settings().forecastEnabled);
+        ForecastEnabledBox().IsOn(m_draft->Settings().forecastEnabled);
         ApiKeyBox().PlaceholderText(m_draft->PersistedHasApiKey()
             ? L"\u5df2\u914d\u7f6e\uff0c\u7559\u7a7a\u5219\u4fdd\u6301\u4e0d\u53d8"
             : L"sk-...");

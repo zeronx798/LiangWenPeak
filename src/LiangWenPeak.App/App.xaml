@@ -9,7 +9,6 @@
             <SolidColorBrush x:Key="SecondaryTextBrush" Color="#D5DEEA" />
             <SolidColorBrush x:Key="TertiaryTextBrush" Color="#8FA1B7" />
             <SolidColorBrush x:Key="DividerBrush" Color="#20324A" />
-            <SolidColorBrush x:Key="TitleButtonHoverBrush" Color="#172A43" />
             <SolidColorBrush x:Key="ValleyBrush" Color="#4ED58A" />
             <SolidColorBrush x:Key="PeakBrush" Color="#FF6470" />
 
@@ -18,7 +17,6 @@
                 <Setter Property="Height" Value="30" />
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="CornerRadius" Value="4" />
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
                 <Setter Property="HorizontalContentAlignment" Value="Center" />

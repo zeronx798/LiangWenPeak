@@ -94,10 +94,23 @@
                     Text="余额预测" />
                 <Border Height="1" Background="{StaticResource DividerBrush}" />
 
-                <CheckBox
-                    x:Name="ForecastEnabledBox"
-                    AutomationProperties.Name="显示余额预测"
-                    Content="显示余额预测" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="{StaticResource SecondaryTextBrush}"
+                        Text="显示余额预测" />
+                    <ToggleSwitch
+                        x:Name="ForecastEnabledBox"
+                        Grid.Column="1"
+                        AutomationProperties.Name="显示余额预测"
+                        OffContent="关"
+                        OnContent="开" />
+                </Grid>
 
                 <TextBlock Style="{StaticResource SettingsLabelStyle}" Text="余额预警" />
                 <TextBox

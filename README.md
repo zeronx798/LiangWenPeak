@@ -38,6 +38,7 @@ LiangWenPeak 根据北京时间显示 DeepSeek API 当前处于原价还是半�
 - 可配置且对齐整分钟的余额自动刷新
 - 本地余额历史、API 消耗速率与余额触底 ETA
 - 滑动平均、指数平均和稳健趋势三种预测算法
+- Windows 11 Fluent Theme 视觉适配，可关闭并记住选择
 - Windows Credential Locker 安全保存 API Key
 - 原生 Win32 Launcher 与 self-contained portable distribution
 - 一条命令完成构建、测试、校验和打包
@@ -66,6 +67,14 @@ LiangWenPeak 根据北京时间显示 DeepSeek API 当前处于原价还是半�
 3. 运行解压目录根部的 `LiangWenPeak.exe`。
 
 发布文件使用 `LiangWenPeak-<version>-windows-x64.zip` 命名。不要单独移动 Launcher、`current.txt` 或版本目录，也不需要直接进入 `app-<version>/` 启动内部应用。
+
+## Fluent Theme
+
+Windows 11 默认启用 Fluent Theme。可在主窗口的 `···` 菜单中取消勾选“Fluent 主题”，应用会立即切换窗口圆角、菜单、按钮、输入框、下拉框、开关及焦点视觉，并记住当前用户的选择。
+
+Windows 10 不显示“Fluent 主题”菜单项；应用不会显示禁用项或“不可用”提示。无论主题是否启用，主窗口都保持深蓝纯色背景、固定尺寸与原有信息布局，不使用 Mica、Acrylic 或半透明材质。
+
+Fluent Theme 只属于 WinUI UI 层，不改变 DeepSeek API 请求、API Key 保存/取消语义、余额历史、消耗预测或 Core Library。
 
 ## API Key 功能
 

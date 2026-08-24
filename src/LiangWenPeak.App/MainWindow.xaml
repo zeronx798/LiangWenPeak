@@ -40,12 +40,15 @@
             <Button
                 x:Name="MoreButton"
                 Grid.Column="1"
+                Foreground="{StaticResource SecondaryTextBrush}"
                 Style="{StaticResource TitleBarIconButtonStyle}"
                 AutomationProperties.Name="更多"
                 ToolTipService.ToolTip="更多">
                 <FontIcon FontSize="15" Glyph="&#xE712;" />
                 <Button.Flyout>
-                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                    <MenuFlyout
+                        x:Name="MainMenuFlyout"
+                        Placement="BottomEdgeAlignedRight">
                         <ToggleMenuFlyoutItem
                             x:Name="AlwaysOnTopMenuItem"
                             Click="OnAlwaysOnTopClick"
@@ -53,6 +56,15 @@
                             Text="始终置顶">
                             <ToggleMenuFlyoutItem.Icon>
                                 <FontIcon Glyph="&#xE718;" />
+                            </ToggleMenuFlyoutItem.Icon>
+                        </ToggleMenuFlyoutItem>
+                        <ToggleMenuFlyoutItem
+                            x:Name="FluentThemeMenuItem"
+                            Click="OnFluentThemeClick"
+                            Text="Fluent 主题"
+                            Visibility="Collapsed">
+                            <ToggleMenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE790;" />
                             </ToggleMenuFlyoutItem.Icon>
                         </ToggleMenuFlyoutItem>
                         <MenuFlyoutItem
@@ -92,8 +104,10 @@
             </Button>
 
             <Button
+                x:Name="CloseButton"
                 Grid.Column="2"
                 Click="OnCloseClick"
+                Foreground="{StaticResource SecondaryTextBrush}"
                 Style="{StaticResource TitleBarIconButtonStyle}"
                 AutomationProperties.Name="关闭"
                 ToolTipService.ToolTip="关闭">
@@ -239,5 +253,6 @@
                 </StackPanel>
             </StackPanel>
         </Grid>
+
     </Grid>
 </Window>
