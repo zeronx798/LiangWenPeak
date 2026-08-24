@@ -2,6 +2,8 @@
 #include "Time/BalanceRefreshSchedule.h"
 #include "Time/BeijingTime.h"
 #include "Time/TimeFormatter.h"
+#include "BalanceStatisticsTests.h"
+#include "MainWindowLayout.h"
 
 #include <chrono>
 #include <iostream>
@@ -306,6 +308,54 @@ namespace
             GetNextAlignedRefreshTime(beforeMidnight, 60min) == beforeMidnight.UtcInstant() + 20s,
             "23:59:40 + 60 minutes aligns to next-day 00:00:00");
     }
+
+    void VerifyMainWindowLayout(TestRunner& tests)
+    {
+        using liangwenpeak::ui::MainWindowBaseBottomPaddingDips;
+        using liangwenpeak::ui::MainWindowClientHeightDips;
+        using liangwenpeak::ui::MainWindowLayoutState;
+        using liangwenpeak::ui::MainWindowUpdateTimeRowHeightDips;
+        using liangwenpeak::ui::MainWindowVisibleContentBottomDips;
+
+        constexpr MainWindowLayoutState apiOff{};
+        constexpr MainWindowLayoutState balanceWithoutUpdate{ true, false, false };
+        constexpr MainWindowLayoutState balanceWithUpdate{ true, false, true };
+        constexpr MainWindowLayoutState forecastWithoutUpdate{ true, true, false };
+        constexpr MainWindowLayoutState forecastWithUpdate{ true, true, true };
+
+        tests.Expect(MainWindowClientHeightDips(apiOff) == 173, "API-off client height stays compact");
+        tests.Expect(
+            MainWindowClientHeightDips(balanceWithoutUpdate) == 200,
+            "balance-only state without an observation omits the update row");
+        tests.Expect(
+            MainWindowClientHeightDips(balanceWithUpdate) == 213,
+            "balance-only state reserves the visible update row");
+        tests.Expect(
+            MainWindowClientHeightDips(forecastWithoutUpdate) == 246,
+            "forecast state without an observation omits the update row");
+        tests.Expect(
+            MainWindowClientHeightDips(forecastWithUpdate) == 259,
+            "forecast state reserves the visible update row");
+        tests.Expect(
+            MainWindowClientHeightDips(balanceWithUpdate)
+                - MainWindowClientHeightDips(balanceWithoutUpdate)
+                == MainWindowUpdateTimeRowHeightDips,
+            "balance-only height grows by exactly one visible update row");
+        tests.Expect(
+            MainWindowClientHeightDips(forecastWithUpdate)
+                - MainWindowClientHeightDips(forecastWithoutUpdate)
+                == MainWindowUpdateTimeRowHeightDips,
+            "forecast height grows by exactly one visible update row");
+
+        constexpr MainWindowLayoutState observedStates[]{ balanceWithUpdate, forecastWithUpdate };
+        for (auto const state : observedStates)
+        {
+            tests.Expect(
+                MainWindowVisibleContentBottomDips(state)
+                    <= MainWindowClientHeightDips(state) - MainWindowBaseBottomPaddingDips,
+                "visible update text ends above the required client-area bottom padding");
+        }
+    }
 }
 
 int main()
@@ -319,10 +369,15 @@ int main()
     VerifyUtcPlusEightConversion(tests);
     VerifyFormatting(tests);
     VerifyBalanceRefreshAlignment(tests);
+    VerifyMainWindowLayout(tests);
+    VerifyBalanceStatistics([&tests](bool const condition, std::string_view const name)
+    {
+        tests.Expect(condition, name);
+    });
 
     if (tests.FailureCount() == 0)
     {
-        std::cout << "All pricing schedule, weekend, formatting, and balance refresh tests passed.\n";
+        std::cout << "All pricing, formatting, scheduling, layout, history, forecast, and ETA tests passed.\n";
     }
     else
     {

@@ -7,8 +7,19 @@
     <Filter Include="Time">
       <UniqueIdentifier>{0C744E02-02F3-4FDC-9E32-C4D41A49493A}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Balance">
+      <UniqueIdentifier>{7879EBE0-4F37-49E0-B413-DBEAF6DFAE63}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Balance\BalanceFormatter.h"><Filter>Balance</Filter></ClInclude>
+    <ClInclude Include="Balance\BalanceForecastService.h"><Filter>Balance</Filter></ClInclude>
+    <ClInclude Include="Balance\BalanceHistoryStore.h"><Filter>Balance</Filter></ClInclude>
+    <ClInclude Include="Balance\BalanceModels.h"><Filter>Balance</Filter></ClInclude>
+    <ClInclude Include="Balance\BalanceSettings.h"><Filter>Balance</Filter></ClInclude>
+    <ClInclude Include="Balance\DecimalAmount.h"><Filter>Balance</Filter></ClInclude>
+    <ClInclude Include="Balance\DeploymentPaths.h"><Filter>Balance</Filter></ClInclude>
+    <ClInclude Include="Balance\SeriesIdentity.h"><Filter>Balance</Filter></ClInclude>
     <ClInclude Include="Pricing\PricingScheduleService.h">
       <Filter>Pricing</Filter>
     </ClInclude>
@@ -23,6 +34,14 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Balance\BalanceFormatter.cpp"><Filter>Balance</Filter></ClCompile>
+    <ClCompile Include="Balance\BalanceForecastService.cpp"><Filter>Balance</Filter></ClCompile>
+    <ClCompile Include="Balance\BalanceHistoryStore.cpp"><Filter>Balance</Filter></ClCompile>
+    <ClCompile Include="Balance\BalanceModels.cpp"><Filter>Balance</Filter></ClCompile>
+    <ClCompile Include="Balance\BalanceSettings.cpp"><Filter>Balance</Filter></ClCompile>
+    <ClCompile Include="Balance\DecimalAmount.cpp"><Filter>Balance</Filter></ClCompile>
+    <ClCompile Include="Balance\DeploymentPaths.cpp"><Filter>Balance</Filter></ClCompile>
+    <ClCompile Include="Balance\SeriesIdentity.cpp"><Filter>Balance</Filter></ClCompile>
     <ClCompile Include="Pricing\PricingScheduleService.cpp">
       <Filter>Pricing</Filter>
     </ClCompile>

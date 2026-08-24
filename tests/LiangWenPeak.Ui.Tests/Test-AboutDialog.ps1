@@ -254,6 +254,8 @@ if (-not (Test-Path -LiteralPath $applicationPath -PathType Leaf)) {
 }
 
 $previousDpiContext = [LiangWenPeakUiTests.NativeMethods]::EnterPerMonitorV2Awareness()
+$dataPath = Join-Path $repositoryRoot 'data'
+$dataExisted = Test-Path -LiteralPath $dataPath
 $application = Start-Process -FilePath $applicationPath -WorkingDirectory $context.BuildOutput -PassThru
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
@@ -387,4 +389,7 @@ try {
 } finally {
     Stop-TestApplication $application
     [LiangWenPeakUiTests.NativeMethods]::RestoreThreadDpiAwareness($previousDpiContext)
+    if (-not $dataExisted -and (Test-Path -LiteralPath $dataPath)) {
+        Remove-Item -LiteralPath $dataPath -Recurse -Force
+    }
 }

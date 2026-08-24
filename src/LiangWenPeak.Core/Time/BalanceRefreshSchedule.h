@@ -22,4 +22,9 @@ namespace liangwenpeak::time
     [[nodiscard]] std::chrono::sys_seconds GetNextAlignedRefreshTime(
         BeijingTime const& now,
         std::chrono::minutes interval);
+
+    [[nodiscard]] bool IsCurrentRefreshTarget(
+        std::chrono::sys_seconds now,
+        std::chrono::sys_seconds target,
+        std::chrono::minutes interval) noexcept;
 }

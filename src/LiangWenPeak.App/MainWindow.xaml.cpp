@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "MainWindow.xaml.h"
+#include "MainWindowLayout.h"
 
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
@@ -10,11 +11,13 @@
 
 #include "Services/CredentialService.h"
 #include "Services/DeepSeekClient.h"
+#include "Services/DeploymentPathService.h"
+#include "Services/HistoryIdentityService.h"
 #include "Services/SettingsService.h"
+#include "Balance/BalanceHistoryStore.h"
 #include "Time/BalanceRefreshSchedule.h"
 #include "Time/BeijingTime.h"
 
-#include <algorithm>
 #include <string>
 
 #pragma comment(lib, "dwmapi.lib")
@@ -30,9 +33,53 @@ namespace winrt::LiangWenPeak::implementation
 
     namespace
     {
-        constexpr int kWindowWidth = 256;
-        constexpr int kWindowHeight = 214;
         constexpr wchar_t kApplicationVersion[] = LIANGWENPEAK_VERSION;
+
+        liangwenpeak::ui::MainWindowLayoutState WindowLayoutState(
+            liangwenpeak::viewmodels::MainViewState const& state) noexcept
+        {
+            return {
+                state.apiFeatureEnabled,
+                state.forecastEnabled,
+                state.hasSuccessfulObservation };
+        }
+
+        int CurrentNonClientHeight(HWND const windowHandle) noexcept
+        {
+            RECT windowRectangle{};
+            RECT clientRectangle{};
+            if (::GetWindowRect(windowHandle, &windowRectangle) == FALSE
+                || ::GetClientRect(windowHandle, &clientRectangle) == FALSE)
+            {
+                return 0;
+            }
+
+            const auto windowHeight = windowRectangle.bottom - windowRectangle.top;
+            const auto clientHeight = clientRectangle.bottom - clientRectangle.top;
+            return windowHeight > clientHeight ? windowHeight - clientHeight : 0;
+        }
+
+        int WindowHeightInPixels(
+            HWND const windowHandle,
+            liangwenpeak::viewmodels::MainViewState const& state,
+            UINT const targetDpi) noexcept
+        {
+            const auto clientHeight = ::MulDiv(
+                liangwenpeak::ui::MainWindowClientHeightDips(WindowLayoutState(state)),
+                static_cast<int>(targetDpi),
+                96);
+
+            auto nonClientHeight = CurrentNonClientHeight(windowHandle);
+            const auto currentDpi = ::GetDpiForWindow(windowHandle);
+            if (currentDpi != 0 && currentDpi != targetDpi)
+            {
+                nonClientHeight = ::MulDiv(
+                    nonClientHeight,
+                    static_cast<int>(targetDpi),
+                    static_cast<int>(currentDpi));
+            }
+            return clientHeight + nonClientHeight;
+        }
 
         UINT GetInitialWindowDpi(HWND const windowHandle) noexcept
         {
@@ -48,37 +95,6 @@ namespace winrt::LiangWenPeak::implementation
 
             const auto systemDpi = ::GetDpiForSystem();
             return systemDpi == 0 ? USER_DEFAULT_SCREEN_DPI : systemDpi;
-        }
-
-        winrt::hstring FormatRefreshInterval(std::chrono::minutes const interval)
-        {
-            return winrt::hstring{ std::to_wstring(interval.count()) + L" \u5206\u949f" };
-        }
-
-        int32_t RefreshIntervalIndex(std::chrono::minutes const interval) noexcept
-        {
-            const auto found = std::find(
-                liangwenpeak::time::SupportedBalanceRefreshIntervals.begin(),
-                liangwenpeak::time::SupportedBalanceRefreshIntervals.end(),
-                interval);
-            if (found == liangwenpeak::time::SupportedBalanceRefreshIntervals.end())
-            {
-                return 0;
-            }
-
-            return static_cast<int32_t>(
-                std::distance(liangwenpeak::time::SupportedBalanceRefreshIntervals.begin(), found));
-        }
-
-        std::chrono::minutes RefreshIntervalAt(int32_t const index) noexcept
-        {
-            if (index < 0
-                || static_cast<size_t>(index) >= liangwenpeak::time::SupportedBalanceRefreshIntervals.size())
-            {
-                return liangwenpeak::time::DefaultBalanceRefreshInterval;
-            }
-
-            return liangwenpeak::time::SupportedBalanceRefreshIntervals[static_cast<size_t>(index)];
         }
 
         void ConfigureCompactDialogLayout(ContentDialog const& dialog)
@@ -100,15 +116,22 @@ namespace winrt::LiangWenPeak::implementation
     {
         InitializeComponent();
 
+        auto credentialService = std::make_shared<liangwenpeak::services::CredentialService>();
+        auto settingsService = std::make_shared<liangwenpeak::services::SettingsService>();
+        auto identityService = std::make_shared<liangwenpeak::services::HistoryIdentityService>();
+        const liangwenpeak::services::DeploymentPathService deploymentPaths;
+        auto historyStore = std::make_shared<liangwenpeak::balance::BalanceHistoryStore>(
+            deploymentPaths.DataRoot());
         m_viewModel = std::make_shared<liangwenpeak::viewmodels::MainViewModel>(
-            std::make_shared<liangwenpeak::services::CredentialService>(),
-            std::make_shared<liangwenpeak::services::DeepSeekClient>());
-        m_settingsService = std::make_shared<liangwenpeak::services::SettingsService>();
-        m_balanceRefreshInterval = m_settingsService->LoadBalanceRefreshInterval();
+            std::move(credentialService),
+            std::make_shared<liangwenpeak::services::DeepSeekClient>(),
+            std::move(settingsService),
+            std::move(identityService),
+            std::move(historyStore));
 
         ConfigureWindow();
-        ApplyWindowPresentation();
         m_viewModel->Initialize();
+        ApplyWindowPresentation();
         ApplyState();
         RootGrid().UpdateLayout();
         ArmFirstFrameReveal();
@@ -125,7 +148,7 @@ namespace winrt::LiangWenPeak::implementation
         m_loaded = true;
         m_clockTimer.Start();
         ScheduleNextBalanceRefresh(std::chrono::system_clock::now());
-        RefreshBalanceAsync();
+        RefreshBalanceAsync(liangwenpeak::balance::BalanceRefreshReason::StartupObservation);
     }
 
     void MainWindow::OnClockTick(IInspectable const&, IInspectable const&)
@@ -147,20 +170,25 @@ namespace winrt::LiangWenPeak::implementation
             return;
         }
 
+        const auto target = *m_nextBalanceRefresh;
         const auto currentSecond = std::chrono::floor<std::chrono::seconds>(now);
-        if (currentSecond < *m_nextBalanceRefresh)
+        if (currentSecond < target)
         {
-            ArmBalanceRefreshTimer(*m_nextBalanceRefresh, now);
-            return;
-        }
-        if (currentSecond > *m_nextBalanceRefresh)
-        {
-            ScheduleNextBalanceRefresh(now);
+            ArmBalanceRefreshTimer(target, now);
             return;
         }
 
+        const bool targetIsCurrent = liangwenpeak::time::IsCurrentRefreshTarget(
+            currentSecond,
+            target,
+            m_viewModel->Settings().refreshInterval);
         ScheduleNextBalanceRefresh(now);
-        RefreshBalanceAsync();
+        if (targetIsCurrent)
+        {
+            RefreshBalanceAsync(
+                liangwenpeak::balance::BalanceRefreshReason::ScheduledSample,
+                target);
+        }
     }
 
     void MainWindow::OnAlwaysOnTopClick(IInspectable const& sender, RoutedEventArgs const&)
@@ -171,12 +199,19 @@ namespace winrt::LiangWenPeak::implementation
 
     void MainWindow::OnRefreshBalanceClick(IInspectable const&, RoutedEventArgs const&)
     {
-        RefreshBalanceAsync();
+        RefreshBalanceAsync(liangwenpeak::balance::BalanceRefreshReason::ManualObservation);
+    }
+
+    void MainWindow::OnForecastToggleClick(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        const auto item = sender.as<ToggleMenuFlyoutItem>();
+        static_cast<void>(m_viewModel->SetForecastEnabled(item.IsChecked()));
+        ApplyState();
     }
 
     void MainWindow::OnSetApiKeyClick(IInspectable const&, RoutedEventArgs const&)
     {
-        ShowApiKeyDialogAsync();
+        ShowApiSettingsWindow();
     }
 
     void MainWindow::OnAboutClick(IInspectable const&, RoutedEventArgs const&)
@@ -221,9 +256,13 @@ namespace winrt::LiangWenPeak::implementation
     void MainWindow::ApplyWindowPresentation()
     {
         const auto dpi = GetInitialWindowDpi(m_windowHandle);
+        const auto clientHeightDips = liangwenpeak::ui::MainWindowClientHeightDips(
+            WindowLayoutState(m_viewModel->State()));
         m_appWindow.Resize({
-            ::MulDiv(kWindowWidth, static_cast<int>(dpi), 96),
-            ::MulDiv(kWindowHeight, static_cast<int>(dpi), 96) });
+            ::MulDiv(liangwenpeak::ui::MainWindowWidthDips, static_cast<int>(dpi), 96),
+            WindowHeightInPixels(m_windowHandle, m_viewModel->State(), dpi) });
+        m_appliedClientHeightDips = clientHeightDips;
+        m_appliedWindowDpi = dpi;
         m_presenter.IsAlwaysOnTop(true);
         AlwaysOnTopMenuItem().IsChecked(true);
     }
@@ -278,7 +317,8 @@ namespace winrt::LiangWenPeak::implementation
     {
         m_balanceTimer.Stop();
         m_nextBalanceRefresh.reset();
-        if (!m_loaded || m_closing || !m_viewModel->State().hasApiKey)
+        const auto& state = m_viewModel->State();
+        if (!m_loaded || m_closing || !state.apiFeatureEnabled || !state.hasApiKey)
         {
             return;
         }
@@ -286,7 +326,7 @@ namespace winrt::LiangWenPeak::implementation
         const auto beijingNow = liangwenpeak::time::BeijingTime::FromUtc(now);
         const auto target = liangwenpeak::time::GetNextAlignedRefreshTime(
             beijingNow,
-            m_balanceRefreshInterval);
+            m_viewModel->Settings().refreshInterval);
         m_nextBalanceRefresh = target;
         ArmBalanceRefreshTimer(target, now);
     }
@@ -312,7 +352,8 @@ namespace winrt::LiangWenPeak::implementation
         {
             return;
         }
-        if (!m_viewModel->State().hasApiKey)
+        const auto& state = m_viewModel->State();
+        if (!state.apiFeatureEnabled || !state.hasApiKey)
         {
             if (m_nextBalanceRefresh)
             {
@@ -323,18 +364,51 @@ namespace winrt::LiangWenPeak::implementation
         }
 
         const auto currentSecond = std::chrono::floor<std::chrono::seconds>(now);
-        if (m_nextBalanceRefresh && currentSecond == *m_nextBalanceRefresh)
+        if (m_nextBalanceRefresh
+            && liangwenpeak::time::IsCurrentRefreshTarget(
+                currentSecond,
+                *m_nextBalanceRefresh,
+                m_viewModel->Settings().refreshInterval))
         {
             return;
         }
 
         const auto expected = liangwenpeak::time::GetNextAlignedRefreshTime(
             liangwenpeak::time::BeijingTime::FromUtc(now),
-            m_balanceRefreshInterval);
+            m_viewModel->Settings().refreshInterval);
         if (!m_nextBalanceRefresh || *m_nextBalanceRefresh != expected)
         {
             ScheduleNextBalanceRefresh(now);
         }
+    }
+
+    void MainWindow::ResizeForCurrentState()
+    {
+        if (!m_appWindow)
+        {
+            return;
+        }
+        const auto dpi = ::GetDpiForWindow(m_windowHandle);
+        const auto effectiveDpi = dpi == 0 ? USER_DEFAULT_SCREEN_DPI : dpi;
+        const auto clientHeightDips = liangwenpeak::ui::MainWindowClientHeightDips(
+            WindowLayoutState(m_viewModel->State()));
+        if (m_appliedClientHeightDips == clientHeightDips
+            && m_appliedWindowDpi == effectiveDpi)
+        {
+            return;
+        }
+
+        const auto currentSize = m_appWindow.Size();
+        const auto targetHeight = WindowHeightInPixels(
+            m_windowHandle,
+            m_viewModel->State(),
+            effectiveDpi);
+        if (currentSize.Height != targetHeight)
+        {
+            m_appWindow.Resize({ currentSize.Width, targetHeight });
+        }
+        m_appliedClientHeightDips = clientHeightDips;
+        m_appliedWindowDpi = effectiveDpi;
     }
 
     void MainWindow::ApplyState()
@@ -344,8 +418,20 @@ namespace winrt::LiangWenPeak::implementation
         StatusText().Text(state.statusText);
         CountdownText().Text(state.countdownText);
         BalanceText().Text(state.balanceText);
+        BurnRateText().Text(state.burnRateText);
+        EtaText().Text(state.etaText);
         NextPeriodText().Text(state.nextPeriodText);
         UpdateStatusText().Text(state.updateStatusText);
+
+        ApiSection().Visibility(state.apiFeatureEnabled ? Visibility::Visible : Visibility::Collapsed);
+        ForecastSection().Visibility(
+            state.apiFeatureEnabled && state.forecastEnabled
+                ? Visibility::Visible
+                : Visibility::Collapsed);
+        UpdateStatusText().Visibility(
+            state.apiFeatureEnabled && state.hasSuccessfulObservation
+                ? Visibility::Visible
+                : Visibility::Collapsed);
 
         const auto brushKey = state.pricingPeriod == liangwenpeak::pricing::PricingPeriod::Peak
             ? L"PeakBrush"
@@ -353,7 +439,10 @@ namespace winrt::LiangWenPeak::implementation
         const auto brush = Application::Current().Resources().Lookup(winrt::box_value(brushKey)).as<Brush>();
         StatusText().Foreground(brush);
 
-        RefreshBalanceMenuItem().IsEnabled(state.hasApiKey && !state.isRefreshing);
+        RefreshBalanceMenuItem().IsEnabled(
+            state.apiFeatureEnabled && state.hasApiKey && !state.isRefreshing);
+        ForecastMenuItem().IsChecked(state.forecastEnabled);
+        ResizeForCurrentState();
     }
 
     void MainWindow::StopTimers() noexcept
@@ -393,13 +482,15 @@ namespace winrt::LiangWenPeak::implementation
         }
     }
 
-    winrt::fire_and_forget MainWindow::RefreshBalanceAsync()
+    winrt::fire_and_forget MainWindow::RefreshBalanceAsync(
+        liangwenpeak::balance::BalanceRefreshReason const reason,
+        std::optional<std::chrono::sys_seconds> const scheduledTimestamp)
     {
         auto weak = get_weak();
         auto viewModel = m_viewModel;
         try
         {
-            auto refresh = viewModel->RefreshBalanceAsync();
+            auto refresh = viewModel->RefreshBalanceAsync(reason, scheduledTimestamp);
             if (auto strong = weak.get(); strong && !strong->m_closing)
             {
                 strong->ApplyState();
@@ -417,108 +508,68 @@ namespace winrt::LiangWenPeak::implementation
         }
     }
 
-    winrt::fire_and_forget MainWindow::ShowApiKeyDialogAsync()
+    void MainWindow::ShowApiSettingsWindow()
     {
+        if (m_apiSettingsWindow)
+        {
+            m_apiSettingsWindow->ShowOwned();
+            return;
+        }
+
         auto weak = get_weak();
-        try
-        {
-            PasswordBox apiKeyBox;
-            apiKeyBox.HorizontalAlignment(HorizontalAlignment::Stretch);
-            apiKeyBox.PlaceholderText(m_viewModel->State().hasApiKey
-                ? L"\u5df2\u914d\u7f6e\uff0c\u7559\u7a7a\u5219\u4fdd\u6301\u4e0d\u53d8"
-                : L"sk-...");
-            apiKeyBox.PasswordRevealMode(PasswordRevealMode::Peek);
-
-            TextBlock apiKeyLabel;
-            apiKeyLabel.Text(L"API Key");
-            apiKeyLabel.FontSize(12);
-
-            TextBlock refreshIntervalLabel;
-            refreshIntervalLabel.Text(L"\u4f59\u989d\u81ea\u52a8\u5237\u65b0");
-            refreshIntervalLabel.FontSize(12);
-
-            ComboBox refreshIntervalBox;
-            refreshIntervalBox.HorizontalAlignment(HorizontalAlignment::Stretch);
-            for (auto const interval : liangwenpeak::time::SupportedBalanceRefreshIntervals)
+        auto window = winrt::make_self<ApiSettingsWindow>();
+        window->InitializeOwned(
+            m_windowHandle,
+            m_viewModel->CreateSettingsDraft(),
+            [weak](
+                liangwenpeak::balance::BalanceSettings settings,
+                liangwenpeak::balance::ApiKeyDraftAction const keyAction,
+                winrt::hstring const& replacementApiKey)
             {
-                refreshIntervalBox.Items().Append(winrt::box_value(FormatRefreshInterval(interval)));
-            }
-            refreshIntervalBox.SelectedIndex(RefreshIntervalIndex(m_balanceRefreshInterval));
-
-            Grid content;
-            content.HorizontalAlignment(HorizontalAlignment::Stretch);
-            content.RowSpacing(6.0);
-            for (int32_t index = 0; index < 4; ++index)
-            {
-                RowDefinition row;
-                row.Height(GridLengthHelper::Auto());
-                content.RowDefinitions().Append(row);
-            }
-
-            Grid::SetRow(apiKeyBox, 1);
-            Grid::SetRow(refreshIntervalLabel, 2);
-            Grid::SetRow(refreshIntervalBox, 3);
-            content.Children().Append(apiKeyLabel);
-            content.Children().Append(apiKeyBox);
-            content.Children().Append(refreshIntervalLabel);
-            content.Children().Append(refreshIntervalBox);
-
-            ScrollViewer contentScroller;
-            contentScroller.HorizontalContentAlignment(HorizontalAlignment::Stretch);
-            contentScroller.HorizontalScrollBarVisibility(ScrollBarVisibility::Disabled);
-            contentScroller.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);
-            contentScroller.Content(content);
-
-            ContentDialog dialog;
-            ConfigureCompactDialogLayout(dialog);
-            dialog.XamlRoot(RootGrid().XamlRoot());
-            dialog.Content(contentScroller);
-            dialog.PrimaryButtonText(L"\u4fdd\u5b58");
-            dialog.SecondaryButtonText(L"\u6e05\u9664");
-            dialog.CloseButtonText(L"\u53d6\u6d88");
-            dialog.DefaultButton(ContentDialogButton::Primary);
-
-            const auto result = co_await dialog.ShowAsync();
-            if (auto strong = weak.get(); strong && !strong->m_closing)
-            {
-                if (result == ContentDialogResult::Primary)
+                auto strong = weak.get();
+                if (!strong || strong->m_closing)
                 {
-                    const auto refreshInterval = RefreshIntervalAt(refreshIntervalBox.SelectedIndex());
-                    if (!strong->m_settingsService->SaveBalanceRefreshInterval(refreshInterval))
-                    {
-                        strong->UpdateStatusText().Text(L"\u8bbe\u7f6e\u4fdd\u5b58\u5931\u8d25");
-                        co_return;
-                    }
-
-                    strong->m_balanceRefreshInterval = refreshInterval;
-                    const auto apiKey = apiKeyBox.Password();
-                    const auto apiKeyChanged = !apiKey.empty();
-                    if (apiKeyChanged)
-                    {
-                        strong->m_viewModel->SaveApiKey(apiKey);
-                    }
-                    strong->ApplyState();
-                    strong->ScheduleNextBalanceRefresh(std::chrono::system_clock::now());
-                    if (apiKeyChanged)
-                    {
-                        strong->RefreshBalanceAsync();
-                    }
+                    return false;
                 }
-                else if (result == ContentDialogResult::Secondary)
+                const auto result = strong->m_viewModel->CommitSettings(
+                    std::move(settings),
+                    keyAction,
+                    replacementApiKey);
+                if (!result.succeeded)
                 {
-                    strong->m_viewModel->SaveApiKey({});
-                    strong->ApplyState();
+                    return false;
+                }
+                strong->ApplyState();
+                if (result.scheduleChanged)
+                {
                     strong->ScheduleNextBalanceRefresh(std::chrono::system_clock::now());
                 }
-            }
-        }
-        catch (...)
-        {
-            if (auto strong = weak.get(); strong && !strong->m_closing)
+                if (result.immediateRefreshReason)
+                {
+                    strong->RefreshBalanceAsync(*result.immediateRefreshReason);
+                }
+                return true;
+            },
+            [weak]()
             {
-                strong->UpdateStatusText().Text(L"\u8bbe\u7f6e\u64cd\u4f5c\u5931\u8d25");
-            }
-        }
+                auto strong = weak.get();
+                if (!strong || strong->m_closing)
+                {
+                    return false;
+                }
+                const bool reset = strong->m_viewModel->ResetStatistics();
+                strong->ApplyState();
+                return reset;
+            },
+            [weak]()
+            {
+                if (auto strong = weak.get())
+                {
+                    strong->m_apiSettingsWindow = nullptr;
+                }
+            });
+        m_apiSettingsWindow = std::move(window);
+        m_apiSettingsWindow->ShowOwned();
     }
 
     winrt::fire_and_forget MainWindow::ShowAboutDialogAsync()
@@ -592,6 +643,10 @@ namespace winrt::LiangWenPeak::implementation
         Microsoft::UI::Windowing::AppWindowClosingEventArgs const&)
     {
         m_closing = true;
+        if (m_apiSettingsWindow)
+        {
+            m_apiSettingsWindow->CloseFromOwner();
+        }
         CancelFirstFrameReveal();
         m_startupCloaked = false;
         StopTimers();

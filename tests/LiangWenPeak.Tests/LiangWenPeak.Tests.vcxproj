@@ -32,14 +32,18 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\..\src\LiangWenPeak.Core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\..\src\LiangWenPeak.Core;$(MSBuildThisFileDirectory)..\..\src\LiangWenPeak.App;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="BalanceStatisticsTests.cpp" />
     <ClCompile Include="PricingScheduleServiceTests.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="BalanceStatisticsTests.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\LiangWenPeak.Core\LiangWenPeak.Core.vcxproj">

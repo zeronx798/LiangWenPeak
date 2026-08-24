@@ -21,6 +21,9 @@
     <ApplicationDefinition Include="App.xaml">
       <Filter>Application</Filter>
     </ApplicationDefinition>
+    <Page Include="ApiSettingsWindow.xaml">
+      <Filter>Application</Filter>
+    </Page>
     <Page Include="MainWindow.xaml">
       <Filter>Application</Filter>
     </Page>
@@ -29,7 +32,13 @@
     <ClInclude Include="App.xaml.h">
       <Filter>Application</Filter>
     </ClInclude>
+    <ClInclude Include="ApiSettingsWindow.xaml.h">
+      <Filter>Application</Filter>
+    </ClInclude>
     <ClInclude Include="MainWindow.xaml.h">
+      <Filter>Application</Filter>
+    </ClInclude>
+    <ClInclude Include="MainWindowLayout.h">
       <Filter>Application</Filter>
     </ClInclude>
     <ClInclude Include="pch.h">
@@ -39,6 +48,12 @@
       <Filter>Services</Filter>
     </ClInclude>
     <ClInclude Include="Services\DeepSeekClient.h">
+      <Filter>Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\DeploymentPathService.h">
+      <Filter>Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\HistoryIdentityService.h">
       <Filter>Services</Filter>
     </ClInclude>
     <ClInclude Include="Services\SettingsService.h">
@@ -52,6 +67,9 @@
     <ClCompile Include="App.xaml.cpp">
       <Filter>Application</Filter>
     </ClCompile>
+    <ClCompile Include="ApiSettingsWindow.xaml.cpp">
+      <Filter>Application</Filter>
+    </ClCompile>
     <ClCompile Include="MainWindow.xaml.cpp">
       <Filter>Application</Filter>
     </ClCompile>
@@ -62,6 +80,12 @@
       <Filter>Services</Filter>
     </ClCompile>
     <ClCompile Include="Services\DeepSeekClient.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\DeploymentPathService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\HistoryIdentityService.cpp">
       <Filter>Services</Filter>
     </ClCompile>
     <ClCompile Include="Services\SettingsService.cpp">

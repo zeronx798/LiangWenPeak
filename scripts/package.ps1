@@ -25,7 +25,7 @@ function Copy-ApplicationPayload {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     foreach ($item in Get-ChildItem -LiteralPath $Context.BuildOutput -Force) {
         if ($item.PSIsContainer) {
-            if ($item.Name -match '(?i)^ui-validation$') {
+            if ($item.Name -match '(?i)^(?:data|ui-validation)$') {
                 continue
             }
             Copy-Item -LiteralPath $item.FullName -Destination $Destination -Recurse -Force
@@ -78,6 +78,11 @@ function Assert-PortableArchive {
         if ($unexpectedWrapper.Count -gt 0) {
             throw 'ERROR: ZIP validation failed; archive contains an extra package-name directory layer.'
         }
+
+        $dataEntries = @($entryNames | Where-Object { $_ -match '(?i)^data(/|$)' })
+        if ($dataEntries.Count -gt 0) {
+            throw 'ERROR: ZIP validation failed; archive contains runtime user data.'
+        }
     } finally {
         $archive.Dispose()
     }
@@ -95,23 +100,24 @@ try {
     Clear-PackageArtifacts -Context $context
     Assert-PackageBuildOutputs -Context $context
 
-    $applicationDirectory = Join-Path $context.PackageDirectory "app-$($context.Version)"
+    $stagingDirectory = $context.PackageStagingDirectory
+    $applicationDirectory = Join-Path $stagingDirectory "app-$($context.Version)"
     Write-Host "[STAGE] Creating $($context.PackageName)..."
     Copy-ApplicationPayload -Context $context -Destination $applicationDirectory
 
     Copy-Item `
         -LiteralPath (Join-Path $context.BuildOutput 'LiangWenPeak.exe') `
-        -Destination (Join-Path $context.PackageDirectory 'LiangWenPeak.exe') `
+        -Destination (Join-Path $stagingDirectory 'LiangWenPeak.exe') `
         -Force
 
     $utf8WithoutBom = [Text.UTF8Encoding]::new($false)
     [IO.File]::WriteAllText(
-        (Join-Path $context.PackageDirectory 'current.txt'),
+        (Join-Path $stagingDirectory 'current.txt'),
         "$($context.Version)`r`n",
         $utf8WithoutBom)
 
     Write-Host '[VALIDATE] Checking portable package contents...'
-    Assert-PortablePackage -Context $context
+    Assert-PortablePackage -Context $context -PackageDirectory $stagingDirectory
 
     $launcherTest = Join-Path $context.RepositoryRoot 'tests\LiangWenPeak.Launcher.Tests\Test-Launcher.ps1'
     if (-not (Test-Path -LiteralPath $launcherTest -PathType Leaf)) {
@@ -123,30 +129,44 @@ try {
         Configuration = $Configuration
         Platform = $Architecture
         SkipStage = $true
+        DistributionRoot = $context.PackageSmokeDirectory
     }
     if (-not $FullLauncherTests) {
         $launcherTestArguments.SmokeOnly = $true
+    }
+    New-Item -ItemType Directory -Path $context.PackageSmokeDirectory -Force | Out-Null
+    foreach ($item in Get-ChildItem -LiteralPath $stagingDirectory -Force) {
+        Copy-Item `
+            -LiteralPath $item.FullName `
+            -Destination $context.PackageSmokeDirectory `
+            -Recurse `
+            -Force
     }
     & $launcherTest @launcherTestArguments
     if (-not $?) {
         throw 'ERROR: staged launcher smoke test failed.'
     }
     Write-Host '[SMOKE] PASS'
+    Assert-PortablePackage -Context $context -PackageDirectory $stagingDirectory
 
     Write-Host '[PACKAGE] Creating portable ZIP...'
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::CreateFromDirectory(
-        $context.PackageDirectory,
+        $stagingDirectory,
         $context.PackageArchive,
         [IO.Compression.CompressionLevel]::Optimal,
         $false)
 
     Assert-PortableArchive -Context $context -ArchivePath $context.PackageArchive
+    Sync-PortablePackage `
+        -Source $stagingDirectory `
+        -Destination $context.PackageDirectory `
+        -AllowedParent (Join-Path $context.RepositoryRoot 'dist')
     Write-Host '[PACKAGE] PASS'
 
     [PSCustomObject]@{
         Context = $context
-        UncompressedSize = Get-DirectorySize $context.PackageDirectory
+        UncompressedSize = Get-DirectorySize $stagingDirectory
         ZipSize = (Get-Item -LiteralPath $context.PackageArchive).Length
         Sha256 = (Get-FileHash -LiteralPath $context.PackageArchive -Algorithm SHA256).Hash
     }
@@ -157,4 +177,10 @@ try {
         }
     }
     throw
+} finally {
+    if ($null -ne (Get-Variable context -ErrorAction SilentlyContinue) -and $null -ne $context) {
+        $buildRoot = Join-Path $context.RepositoryRoot 'build'
+        Remove-GeneratedDirectory $context.PackageStagingDirectory $buildRoot
+        Remove-GeneratedDirectory $context.PackageSmokeDirectory $buildRoot
+    }
 }

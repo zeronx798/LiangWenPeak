@@ -5,6 +5,8 @@ build/
 dist/
 artifacts/
 packages/
+release/
+/data/
 **/Generated Files/
 **/obj/
 **/bin/

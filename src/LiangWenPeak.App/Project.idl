@@ -5,4 +5,10 @@ namespace LiangWenPeak
     {
         MainWindow();
     }
+
+    [default_interface]
+    runtimeclass ApiSettingsWindow : Microsoft.UI.Xaml.Window
+    {
+        ApiSettingsWindow();
+    }
 }

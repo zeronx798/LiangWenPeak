@@ -47,6 +47,7 @@ function New-RequiredPortableFixture {
         'current.txt',
         "app-$Version\LiangWenPeak.App.exe",
         "app-$Version\App.xbf",
+        "app-$Version\ApiSettingsWindow.xbf",
         "app-$Version\MainWindow.xbf",
         "app-$Version\LiangWenPeak.pri",
         "app-$Version\Microsoft.WindowsAppRuntime.dll",
@@ -67,6 +68,7 @@ Remove-GeneratedDirectory -Path $testRoot -AllowedParent $buildRoot
 New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
 
 try {
+    $sourceVersion = Get-SourceVersion $repositoryRoot
     $fakeVsWhere = Join-Path $testRoot 'empty-vswhere.cmd'
     Write-Utf8WithoutBom -Path $fakeVsWhere -Contents "@echo off`r`necho []`r`n"
     Assert-ThrowsLike `
@@ -130,16 +132,87 @@ try {
         -Action { Assert-PackageBuildOutputs -Context $missingAppContext }
 
     $forbiddenPackageRoot = Join-Path $testRoot 'forbidden-package'
-    New-RequiredPortableFixture -Root $forbiddenPackageRoot -Version '1.0.0'
+    New-RequiredPortableFixture -Root $forbiddenPackageRoot -Version $sourceVersion
     [IO.File]::WriteAllBytes((Join-Path $forbiddenPackageRoot 'debug.pdb'), [byte[]]@())
     $forbiddenContext = [PSCustomObject]@{
-        Version = '1.0.0'
+        Version = $sourceVersion
         PackageDirectory = $forbiddenPackageRoot
     }
     Assert-ThrowsLike `
         -Name 'forbidden artifacts block ZIP creation' `
         -ExpectedPattern '*forbidden artifacts*' `
         -Action { Assert-PortablePackage -Context $forbiddenContext }
+
+    $historyLeakRoot = Join-Path $testRoot 'history-leak-package'
+    New-RequiredPortableFixture -Root $historyLeakRoot -Version $sourceVersion
+    New-Item -ItemType Directory -Path (Join-Path $historyLeakRoot 'data') -Force | Out-Null
+    Write-Utf8WithoutBom `
+        -Path (Join-Path $historyLeakRoot 'data\balance-history.csv') `
+        -Contents "series_id,timestamp,currency,balance`n"
+    $historyLeakContext = [PSCustomObject]@{
+        Version = $sourceVersion
+        PackageDirectory = $historyLeakRoot
+    }
+    Assert-ThrowsLike `
+        -Name 'user history data blocks ZIP creation' `
+        -ExpectedPattern '*runtime data directory*' `
+        -Action { Assert-PortablePackage -Context $historyLeakContext }
+
+    $sentinelRepository = Join-Path $testRoot 'sentinel-repository'
+    $sentinelDist = Join-Path $sentinelRepository 'dist'
+    $sentinelBuild = Join-Path $sentinelRepository 'build'
+    $publishedRoot = Join-Path $sentinelDist "LiangWenPeak-$sourceVersion-windows-x64"
+    $sentinelPath = Join-Path $publishedRoot 'data\history\sentinel.txt'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $sentinelPath) -Force | Out-Null
+    $sentinelContents = "local-history-must-survive-$sourceVersion"
+    Write-Utf8WithoutBom -Path $sentinelPath -Contents $sentinelContents
+    Write-Utf8WithoutBom -Path (Join-Path $publishedRoot 'stale-generated-file.txt') -Contents 'stale'
+
+    $stagingRoot = Join-Path $sentinelBuild 'package-staging\fixture'
+    New-RequiredPortableFixture -Root $stagingRoot -Version $sourceVersion
+    $sentinelContext = [PSCustomObject]@{
+        RepositoryRoot = $sentinelRepository
+        PackageDirectory = $publishedRoot
+        PackageArchive = Join-Path $sentinelDist "LiangWenPeak-$sourceVersion-windows-x64.zip"
+        PackageStagingDirectory = $stagingRoot
+        PackageSmokeDirectory = Join-Path $sentinelBuild 'package-smoke\fixture'
+    }
+
+    Clear-PackageArtifacts -Context $sentinelContext
+    if ([IO.File]::ReadAllText($sentinelPath) -ne $sentinelContents) {
+        throw 'package cleanup modified the local data sentinel.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $publishedRoot 'stale-generated-file.txt')) {
+        throw 'package cleanup did not remove a stale managed artifact.'
+    }
+
+    New-RequiredPortableFixture -Root $stagingRoot -Version $sourceVersion
+    Sync-PortablePackage `
+        -Source $stagingRoot `
+        -Destination $publishedRoot `
+        -AllowedParent $sentinelDist
+    if ([IO.File]::ReadAllText($sentinelPath) -ne $sentinelContents) {
+        throw 'portable publishing modified the local data sentinel.'
+    }
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [IO.Compression.ZipFile]::CreateFromDirectory(
+        $stagingRoot,
+        $sentinelContext.PackageArchive,
+        [IO.Compression.CompressionLevel]::Optimal,
+        $false)
+    $sentinelArchive = [IO.Compression.ZipFile]::OpenRead($sentinelContext.PackageArchive)
+    try {
+        $leakedData = @($sentinelArchive.Entries | Where-Object {
+            $_.FullName.Replace('\', '/') -match '(?i)^data(/|$)'
+        })
+        if ($leakedData.Count -ne 0) {
+            throw 'the local data sentinel leaked into the portable archive.'
+        }
+    } finally {
+        $sentinelArchive.Dispose()
+    }
+    Write-Host 'PASS: local data sentinel survives clean/publish and is excluded from ZIP'
 
     Write-Host 'All release pipeline negative tests passed.'
 } finally {

@@ -35,12 +35,28 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Balance\BalanceFormatter.h" />
+    <ClInclude Include="Balance\BalanceForecastService.h" />
+    <ClInclude Include="Balance\BalanceHistoryStore.h" />
+    <ClInclude Include="Balance\BalanceModels.h" />
+    <ClInclude Include="Balance\BalanceSettings.h" />
+    <ClInclude Include="Balance\DecimalAmount.h" />
+    <ClInclude Include="Balance\DeploymentPaths.h" />
+    <ClInclude Include="Balance\SeriesIdentity.h" />
     <ClInclude Include="Pricing\PricingScheduleService.h" />
     <ClInclude Include="Time\BalanceRefreshSchedule.h" />
     <ClInclude Include="Time\BeijingTime.h" />
     <ClInclude Include="Time\TimeFormatter.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Balance\BalanceFormatter.cpp" />
+    <ClCompile Include="Balance\BalanceForecastService.cpp" />
+    <ClCompile Include="Balance\BalanceHistoryStore.cpp" />
+    <ClCompile Include="Balance\BalanceModels.cpp" />
+    <ClCompile Include="Balance\BalanceSettings.cpp" />
+    <ClCompile Include="Balance\DecimalAmount.cpp" />
+    <ClCompile Include="Balance\DeploymentPaths.cpp" />
+    <ClCompile Include="Balance\SeriesIdentity.cpp" />
     <ClCompile Include="Pricing\PricingScheduleService.cpp" />
     <ClCompile Include="Time\BalanceRefreshSchedule.cpp" />
     <ClCompile Include="Time\BeijingTime.cpp" />

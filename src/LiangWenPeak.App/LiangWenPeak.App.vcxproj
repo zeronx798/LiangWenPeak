@@ -99,18 +99,25 @@
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
+    <Page Include="ApiSettingsWindow.xaml" />
     <Page Include="MainWindow.xaml" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="App.xaml.h">
       <DependentUpon>App.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="ApiSettingsWindow.xaml.h">
+      <DependentUpon>ApiSettingsWindow.xaml</DependentUpon>
+    </ClInclude>
     <ClInclude Include="MainWindow.xaml.h">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="MainWindowLayout.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Services\CredentialService.h" />
     <ClInclude Include="Services\DeepSeekClient.h" />
+    <ClInclude Include="Services\DeploymentPathService.h" />
+    <ClInclude Include="Services\HistoryIdentityService.h" />
     <ClInclude Include="Services\SettingsService.h" />
     <ClInclude Include="ViewModels\MainViewModel.h" />
   </ItemGroup>
@@ -121,11 +128,16 @@
     <ClCompile Include="App.xaml.cpp">
       <DependentUpon>App.xaml</DependentUpon>
     </ClCompile>
+    <ClCompile Include="ApiSettingsWindow.xaml.cpp">
+      <DependentUpon>ApiSettingsWindow.xaml</DependentUpon>
+    </ClCompile>
     <ClCompile Include="MainWindow.xaml.cpp">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClCompile>
     <ClCompile Include="Services\CredentialService.cpp" />
     <ClCompile Include="Services\DeepSeekClient.cpp" />
+    <ClCompile Include="Services\DeploymentPathService.cpp" />
+    <ClCompile Include="Services\HistoryIdentityService.cpp" />
     <ClCompile Include="Services\SettingsService.cpp" />
     <ClCompile Include="ViewModels\MainViewModel.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
