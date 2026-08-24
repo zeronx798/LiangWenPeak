@@ -29,4 +29,14 @@ namespace liangwenpeak::time
         const auto remaining = std::chrono::seconds{ nextElapsedSeconds } - timeOfDay;
         return now.UtcInstant() + remaining;
     }
+
+    bool IsCurrentRefreshTarget(
+        std::chrono::sys_seconds const now,
+        std::chrono::sys_seconds const target,
+        std::chrono::minutes const interval) noexcept
+    {
+        return IsSupportedBalanceRefreshInterval(interval)
+            && now >= target
+            && now < target + interval;
+    }
 }

@@ -1,9 +1,12 @@
 #include "pch.h"
 #include "MainViewModel.h"
 
+#include "Balance/BalanceFormatter.h"
+#include "Balance/SeriesIdentity.h"
 #include "Time/BeijingTime.h"
 #include "Time/TimeFormatter.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace liangwenpeak::viewmodels
@@ -14,20 +17,47 @@ namespace liangwenpeak::viewmodels
         {
             return winrt::hstring{ value };
         }
+
+        bool SameCurrencies(
+            std::vector<std::string> const& left,
+            std::vector<std::string> const& right)
+        {
+            auto sortedLeft = left;
+            auto sortedRight = right;
+            std::sort(sortedLeft.begin(), sortedLeft.end());
+            std::sort(sortedRight.begin(), sortedRight.end());
+            return sortedLeft == sortedRight;
+        }
     }
 
     MainViewModel::MainViewModel(
         std::shared_ptr<services::CredentialService> credentialService,
-        std::shared_ptr<services::DeepSeekClient> deepSeekClient)
+        std::shared_ptr<services::DeepSeekClient> deepSeekClient,
+        std::shared_ptr<services::SettingsService> settingsService,
+        std::shared_ptr<services::HistoryIdentityService> identityService,
+        std::shared_ptr<balance::BalanceHistoryStore> historyStore)
         : m_credentialService(std::move(credentialService)),
-          m_deepSeekClient(std::move(deepSeekClient))
+          m_deepSeekClient(std::move(deepSeekClient)),
+          m_settingsService(std::move(settingsService)),
+          m_identityService(std::move(identityService)),
+          m_historyStore(std::move(historyStore))
     {
     }
 
     void MainViewModel::Initialize()
     {
+        m_settings = m_settingsService->LoadBalanceSettings();
+        try
+        {
+            static_cast<void>(m_historyStore->Load());
+        }
+        catch (...)
+        {
+            m_historyWriteFailed = true;
+        }
+        m_state.apiFeatureEnabled = m_settings.apiFeatureEnabled;
+        m_state.forecastEnabled = m_settings.forecastEnabled;
         m_state.hasApiKey = m_credentialService->HasApiKey();
-        m_state.balanceText = m_state.hasApiKey ? L"\u66f4\u65b0\u4e2d\u2026" : L"\u672a\u914d\u7f6e";
         UpdateClock();
     }
 
@@ -42,70 +72,270 @@ namespace liangwenpeak::viewmodels
         if (pricing.currentPeriod == pricing::PricingPeriod::Peak)
         {
             m_state.statusText = L"\u6881 \u6587 \u5cf0 \u00b7 \u539f \u4ef7";
-            m_state.countdownText = L"\u8ddd\u79bb\u6881\u6587\u8c37\u8fd8\u6709 " + ToHString(time::FormatDuration(pricing.remaining));
+            m_state.countdownText = L"\u8ddd\u79bb\u6881\u6587\u8c37\u8fd8\u6709 "
+                + ToHString(time::FormatDuration(pricing.remaining));
         }
         else
         {
             m_state.statusText = L"\u6881 \u6587 \u8c37 \u00b7 \u534a \u4ef7";
-            m_state.countdownText = L"\u8ddd\u79bb\u6881\u6587\u5cf0\u8fd8\u6709 " + ToHString(time::FormatDuration(pricing.remaining));
+            m_state.countdownText = L"\u8ddd\u79bb\u6881\u6587\u5cf0\u8fd8\u6709 "
+                + ToHString(time::FormatDuration(pricing.remaining));
         }
         m_state.nextPeriodText = ToHString(time::FormatPeriodRange(pricing.nextTransition.nextRange));
         UpdateBalancePresentation(utcNow);
     }
 
-    winrt::Windows::Foundation::IAsyncAction MainViewModel::RefreshBalanceAsync()
+    winrt::Windows::Foundation::IAsyncAction MainViewModel::RefreshBalanceAsync(
+        balance::BalanceRefreshReason const reason,
+        std::optional<std::chrono::sys_seconds> const scheduledTimestamp)
     {
-        if (m_state.isRefreshing)
+        if (balance::WritesHistory(reason) && !scheduledTimestamp)
+        {
+            throw winrt::hresult_invalid_argument(L"Scheduled balance refresh requires its target timestamp.");
+        }
+        if (!m_settings.apiFeatureEnabled)
         {
             co_return;
         }
-
-        auto apiKey = m_credentialService->TryGetApiKey();
-        m_state.hasApiKey = apiKey.has_value();
-        if (!apiKey)
+        if (m_state.isRefreshing)
         {
-            m_balance.reset();
-            m_lastSuccessfulUpdate.reset();
-            m_lastRefreshFailed = false;
-            m_state.balanceText = L"\u672a\u914d\u7f6e";
-            m_state.updateStatusText = {};
+            if (reason == balance::BalanceRefreshReason::SavedKeyObservation
+                || reason == balance::BalanceRefreshReason::ApiReenabledObservation)
+            {
+                m_pendingObservationReason = reason;
+            }
             co_return;
         }
 
         m_state.isRefreshing = true;
-        if (!m_balance)
-        {
-            m_state.balanceText = L"\u66f4\u65b0\u4e2d\u2026";
-        }
         UpdateBalancePresentation(std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+        auto currentReason = reason;
+        auto currentTimestamp = scheduledTimestamp;
+        for (;;)
+        {
+            if (!m_settings.apiFeatureEnabled)
+            {
+                break;
+            }
+
+            const auto generation = m_refreshGeneration;
+            auto apiKey = m_credentialService->TryGetApiKey();
+            m_state.hasApiKey = apiKey.has_value();
+            if (!apiKey)
+            {
+                ResetObservationState();
+                break;
+            }
+
+            try
+            {
+                const auto responseText = co_await m_deepSeekClient->GetBalanceResponseAsync(*apiKey);
+                if (generation == m_refreshGeneration && m_settings.apiFeatureEnabled)
+                {
+                    const auto balances = services::DeepSeekClient::ParseBalanceResponse(responseText);
+                    std::map<std::string, balance::DecimalAmount, std::less<>> latest;
+                    std::vector<std::string> currencies;
+                    currencies.reserve(balances.size());
+                    for (auto const& value : balances)
+                    {
+                        latest.insert_or_assign(value.currency, value.balance);
+                        currencies.push_back(value.currency);
+                    }
+
+                    const auto previousCurrencies = m_settings.knownCurrencies;
+                    const auto selectedChanged = balance::ReconcileSelectedCurrency(m_settings, currencies);
+                    if (selectedChanged || !SameCurrencies(previousCurrencies, m_settings.knownCurrencies))
+                    {
+                        static_cast<void>(m_settingsService->SaveBalanceSettings(m_settings));
+                    }
+
+                    m_latestBalances = std::move(latest);
+                    m_lastObservationTime = std::chrono::floor<std::chrono::seconds>(
+                        std::chrono::system_clock::now());
+                    m_lastRefreshFailed = false;
+
+                    if (balance::WritesHistory(currentReason))
+                    {
+                        try
+                        {
+                            const auto seriesId = m_identityService->GetSeriesId(*apiKey);
+                            m_historyStore->AppendSamples(balance::CreateHistorySampleBatch(
+                                currentReason,
+                                currentTimestamp,
+                                seriesId,
+                                balances));
+                            m_historyWriteFailed = false;
+                        }
+                        catch (...)
+                        {
+                            m_historyWriteFailed = true;
+                        }
+                    }
+                }
+            }
+            catch (...)
+            {
+                if (generation == m_refreshGeneration)
+                {
+                    m_lastRefreshFailed = true;
+                }
+            }
+
+            apiKey.reset();
+            if (m_pendingObservationReason && m_settings.apiFeatureEnabled)
+            {
+                currentReason = *m_pendingObservationReason;
+                currentTimestamp.reset();
+                m_pendingObservationReason.reset();
+                continue;
+            }
+            break;
+        }
+
+        m_state.isRefreshing = false;
+        UpdateBalancePresentation(std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+    }
+
+    balance::ApiSettingsDraft MainViewModel::CreateSettingsDraft() const
+    {
+        return balance::ApiSettingsDraft{ m_settings, m_credentialService->HasApiKey() };
+    }
+
+    SettingsCommitResult MainViewModel::CommitSettings(
+        balance::BalanceSettings settings,
+        balance::ApiKeyDraftAction const keyAction,
+        winrt::hstring const& replacementApiKey,
+        std::chrono::sys_seconds const now)
+    {
+        balance::NormalizeBalanceSettings(settings);
+        if (keyAction == balance::ApiKeyDraftAction::Replace && replacementApiKey.empty())
+        {
+            return {};
+        }
+
+        const auto previousSettings = m_settings;
+        if (!m_settings.knownCurrencies.empty())
+        {
+            settings.knownCurrencies = m_settings.knownCurrencies;
+            if (std::find(
+                    settings.knownCurrencies.begin(),
+                    settings.knownCurrencies.end(),
+                    settings.selectedCurrency) == settings.knownCurrencies.end())
+            {
+                settings.selectedCurrency = settings.knownCurrencies.front();
+            }
+        }
+        auto previousApiKey = m_credentialService->TryGetApiKey();
+        if (!m_settingsService->SaveBalanceSettings(settings))
+        {
+            return {};
+        }
 
         try
         {
-            const auto balance = co_await m_deepSeekClient->GetCnyBalanceAsync(*apiKey);
-            m_balance = balance;
-            m_lastSuccessfulUpdate = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-            m_lastRefreshFailed = false;
+            if (keyAction == balance::ApiKeyDraftAction::Clear)
+            {
+                m_credentialService->ClearApiKey();
+            }
+            else if (keyAction == balance::ApiKeyDraftAction::Replace)
+            {
+                m_credentialService->SaveApiKey(replacementApiKey);
+            }
+
+            if (previousSettings.apiFeatureEnabled != settings.apiFeatureEnabled)
+            {
+                m_historyStore->AppendMarker(
+                    settings.apiFeatureEnabled
+                        ? balance::HistoryEntryKind::ApiOn
+                        : balance::HistoryEntryKind::ApiOff,
+                    now);
+            }
         }
         catch (...)
         {
-            m_lastRefreshFailed = true;
+            static_cast<void>(m_settingsService->SaveBalanceSettings(previousSettings));
+            try
+            {
+                if (previousApiKey)
+                {
+                    m_credentialService->SaveApiKey(*previousApiKey);
+                }
+                else
+                {
+                    m_credentialService->ClearApiKey();
+                }
+            }
+            catch (...)
+            {
+                // The original exception remains the authoritative save failure.
+            }
+            return {};
         }
 
-        apiKey.reset();
-        m_state.isRefreshing = false;
-        const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+        m_settings = std::move(settings);
+        const bool keyChanged = keyAction != balance::ApiKeyDraftAction::Keep;
+        if (keyChanged || previousSettings.apiFeatureEnabled != m_settings.apiFeatureEnabled)
+        {
+            ++m_refreshGeneration;
+        }
+        if (keyChanged)
+        {
+            ResetObservationState();
+        }
+        m_state.apiFeatureEnabled = m_settings.apiFeatureEnabled;
+        m_state.forecastEnabled = m_settings.forecastEnabled;
+        m_state.hasApiKey = m_credentialService->HasApiKey();
         UpdateBalancePresentation(now);
+
+        SettingsCommitResult result;
+        result.succeeded = true;
+        result.scheduleChanged = keyChanged
+            || previousSettings.apiFeatureEnabled != m_settings.apiFeatureEnabled
+            || previousSettings.refreshInterval != m_settings.refreshInterval;
+        if (m_settings.apiFeatureEnabled && m_state.hasApiKey)
+        {
+            if (keyAction == balance::ApiKeyDraftAction::Replace)
+            {
+                result.immediateRefreshReason = balance::BalanceRefreshReason::SavedKeyObservation;
+            }
+            else if (!previousSettings.apiFeatureEnabled)
+            {
+                result.immediateRefreshReason = balance::BalanceRefreshReason::ApiReenabledObservation;
+            }
+        }
+        previousApiKey.reset();
+        return result;
     }
 
-    void MainViewModel::SaveApiKey(winrt::hstring const& apiKey)
+    bool MainViewModel::SetForecastEnabled(bool const enabled)
     {
-        m_credentialService->SaveApiKey(apiKey);
-        m_state.hasApiKey = m_credentialService->HasApiKey();
-        m_balance.reset();
-        m_lastSuccessfulUpdate.reset();
-        m_lastRefreshFailed = false;
-        m_state.balanceText = m_state.hasApiKey ? L"\u66f4\u65b0\u4e2d\u2026" : L"\u672a\u914d\u7f6e";
-        m_state.updateStatusText = {};
+        auto updated = m_settings;
+        updated.forecastEnabled = enabled;
+        if (!m_settingsService->SaveBalanceSettings(updated))
+        {
+            return false;
+        }
+        m_settings = std::move(updated);
+        m_state.forecastEnabled = enabled;
+        UpdateBalancePresentation(std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
+        return true;
+    }
+
+    bool MainViewModel::ResetStatistics(std::chrono::sys_seconds const now)
+    {
+        try
+        {
+            static_cast<void>(m_historyStore->Rollover(now));
+            ++m_refreshGeneration;
+            m_historyWriteFailed = false;
+            UpdateBalancePresentation(now);
+            return true;
+        }
+        catch (...)
+        {
+            m_historyWriteFailed = true;
+            return false;
+        }
     }
 
     MainViewState const& MainViewModel::State() const noexcept
@@ -113,47 +343,113 @@ namespace liangwenpeak::viewmodels
         return m_state;
     }
 
+    balance::BalanceSettings const& MainViewModel::Settings() const noexcept
+    {
+        return m_settings;
+    }
+
+    void MainViewModel::ResetObservationState()
+    {
+        m_latestBalances.clear();
+        m_lastObservationTime.reset();
+        m_lastRefreshFailed = false;
+        m_state.hasSuccessfulObservation = false;
+    }
+
     void MainViewModel::UpdateBalancePresentation(std::chrono::sys_seconds const now)
     {
-        if (!m_state.hasApiKey)
+        m_state.apiFeatureEnabled = m_settings.apiFeatureEnabled;
+        m_state.forecastEnabled = m_settings.forecastEnabled;
+        m_state.hasApiKey = m_credentialService->HasApiKey();
+        m_state.hasSuccessfulObservation = m_lastObservationTime.has_value();
+
+        if (!m_settings.apiFeatureEnabled)
         {
-            m_state.balanceText = L"\u672a\u914d\u7f6e";
+            m_state.balanceText = {};
+            m_state.burnRateText = {};
+            m_state.etaText = {};
             m_state.updateStatusText = {};
             return;
         }
 
-        if (m_balance)
+        if (!m_state.hasApiKey)
         {
-            m_state.balanceText = ToHString(time::FormatCnyBalance(*m_balance));
-        }
-        else if (!m_state.isRefreshing && m_lastRefreshFailed)
-        {
-            m_state.balanceText = L"\u6682\u4e0d\u53ef\u7528";
-        }
-
-        if (m_state.isRefreshing)
-        {
-            m_state.updateStatusText = L"\u6b63\u5728\u66f4\u65b0";
+            m_state.balanceText = L"\u672a\u914d\u7f6e";
+            m_state.burnRateText = m_settings.forecastEnabled ? L"\u2014\u2014" : winrt::hstring{};
+            m_state.etaText = m_settings.forecastEnabled ? L"\u2014\u2014" : winrt::hstring{};
+            m_state.updateStatusText = {};
             return;
         }
 
-        if (m_lastSuccessfulUpdate)
+        const auto currentBalance = CurrentBalance();
+        if (currentBalance)
         {
-            const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - *m_lastSuccessfulUpdate);
-            auto updateText = time::FormatLastUpdated(elapsed);
+            m_state.balanceText = ToHString(balance::FormatCurrencyAmount(
+                m_settings.selectedCurrency,
+                *currentBalance));
+        }
+        else if (m_lastRefreshFailed)
+        {
+            m_state.balanceText = L"\u6682\u4e0d\u53ef\u7528";
+        }
+        else
+        {
+            m_state.balanceText = L"\u66f4\u65b0\u4e2d\u2026";
+        }
+
+        if (m_settings.forecastEnabled)
+        {
+            const auto forecast = m_forecastService.Forecast(
+                m_historyStore->Entries(),
+                m_settings.selectedCurrency,
+                m_settings.rateWindow,
+                balance::GetEffectiveAlgorithm(m_settings));
+            m_state.burnRateText = forecast.hasValidInterval
+                ? ToHString(balance::FormatBurnRate(m_settings.selectedCurrency, forecast.burnPerHour))
+                : winrt::hstring{ L"\u83b7\u53d6\u4e2d" };
+            if (currentBalance)
+            {
+                m_state.etaText = ToHString(balance::FormatEta(balance::CalculateEta(
+                    *currentBalance,
+                    balance::GetWarningBalance(m_settings, m_settings.selectedCurrency),
+                    forecast)));
+            }
+            else
+            {
+                m_state.etaText = L"\u83b7\u53d6\u4e2d";
+            }
+        }
+        else
+        {
+            m_state.burnRateText = {};
+            m_state.etaText = {};
+        }
+
+        if (m_lastObservationTime)
+        {
+            auto updateText = time::FormatLastUpdated(
+                std::chrono::duration_cast<std::chrono::seconds>(now - *m_lastObservationTime));
             if (m_lastRefreshFailed)
             {
                 updateText = L"\u66f4\u65b0\u5931\u8d25 \u00b7 " + updateText;
             }
+            if (m_historyWriteFailed && m_settings.forecastEnabled)
+            {
+                updateText = L"\u5386\u53f2\u5199\u5165\u5931\u8d25 \u00b7 " + updateText;
+            }
             m_state.updateStatusText = ToHString(updateText);
-        }
-        else if (m_lastRefreshFailed)
-        {
-            m_state.updateStatusText = L"\u66f4\u65b0\u5931\u8d25";
         }
         else
         {
             m_state.updateStatusText = {};
         }
+    }
+
+    std::optional<balance::DecimalAmount> MainViewModel::CurrentBalance() const
+    {
+        const auto found = m_latestBalances.find(m_settings.selectedCurrency);
+        return found == m_latestBalances.end()
+            ? std::nullopt
+            : std::optional<balance::DecimalAmount>{ found->second };
     }
 }

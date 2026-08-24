@@ -39,11 +39,19 @@
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="MaxWidth" Value="170" />
                 <Setter Property="TextAlignment" Value="Right" />
                 <Setter Property="Typography.NumeralAlignment" Value="Tabular" />
                 <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="TextTrimming" Value="None" />
+                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
                 <Setter Property="TextWrapping" Value="NoWrap" />
+            </Style>
+
+            <Style x:Key="SettingsLabelStyle" TargetType="TextBlock">
+                <Setter Property="Margin" Value="0,2,0,0" />
+                <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>

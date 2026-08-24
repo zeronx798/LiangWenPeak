@@ -2,9 +2,13 @@
 param(
     [string]$ProcessName = 'LiangWenPeak.App',
 
+    [long]$WindowHandle,
+
     [string]$Name = ('ui-{0:yyyyMMdd-HHmmss}' -f (Get-Date)),
 
-    [string]$OutputPath
+    [string]$OutputPath,
+
+    [switch]$PassThru
 )
 
 Set-StrictMode -Version Latest
@@ -29,19 +33,30 @@ namespace UiValidation
             public int Bottom;
         }
 
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(
+            IntPtr window,
+            int attribute,
+            out Rect value,
+            int valueSize);
+
         [DllImport("user32.dll")]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool GetWindowRect(IntPtr window, out Rect rect);
+        public static extern uint GetDpiForWindow(IntPtr window);
 
         [DllImport("user32.dll")]
         private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
 
-        public static bool GetPhysicalWindowRect(IntPtr window, out Rect rect)
+        public static bool GetPhysicalExtendedFrameRect(IntPtr window, out Rect rect)
         {
             IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
             try
             {
-                return GetWindowRect(window, out rect);
+                const int DwmwaExtendedFrameBounds = 9;
+                return DwmGetWindowAttribute(
+                    window,
+                    DwmwaExtendedFrameBounds,
+                    out rect,
+                    Marshal.SizeOf<Rect>()) == 0;
             }
             finally
             {
@@ -65,15 +80,20 @@ if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($OutputPath)) -Force | Out-Null
 }
 
-$process = Get-Process -Name $ProcessName -ErrorAction Stop | Select-Object -First 1
-$process.Refresh()
-if ($process.MainWindowHandle -eq [IntPtr]::Zero) {
-    throw "Process '$ProcessName' does not have a visible main window."
+if ($WindowHandle -ne 0) {
+    $handle = [IntPtr]$WindowHandle
+} else {
+    $process = Get-Process -Name $ProcessName -ErrorAction Stop | Select-Object -First 1
+    $process.Refresh()
+    $handle = $process.MainWindowHandle
+    if ($handle -eq [IntPtr]::Zero) {
+        throw "Process '$ProcessName' does not have a visible main window."
+    }
 }
 
 $rect = [UiValidation.NativeMethods+Rect]::new()
-if (-not [UiValidation.NativeMethods]::GetPhysicalWindowRect($process.MainWindowHandle, [ref]$rect)) {
-    throw "GetWindowRect failed for process '$ProcessName'."
+if (-not [UiValidation.NativeMethods]::GetPhysicalExtendedFrameRect($handle, [ref]$rect)) {
+    throw "DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS) failed for HWND $handle."
 }
 
 $width = $rect.Right - $rect.Left
@@ -92,4 +112,17 @@ try {
     $bitmap.Dispose()
 }
 
-Write-Output $OutputPath
+$result = [pscustomobject]@{
+    OutputPath = $OutputPath
+    WindowHandle = $handle.ToInt64()
+    Left = $rect.Left
+    Top = $rect.Top
+    Width = $width
+    Height = $height
+    Dpi = [UiValidation.NativeMethods]::GetDpiForWindow($handle)
+}
+if ($PassThru) {
+    Write-Output $result
+} else {
+    Write-Output $OutputPath
+}

@@ -333,6 +333,8 @@ function Get-BuildContext {
         Target = $target
         BuildOutput = Join-Path $root "build\$Architecture\$Configuration"
         PackageName = $packageName
+        PackageStagingDirectory = Join-Path $root "build\package-staging\$packageName"
+        PackageSmokeDirectory = Join-Path $root "build\package-smoke\$packageName"
         PackageDirectory = Join-Path $root "dist\$packageName"
         PackageArchive = Join-Path $root "dist\$packageName.zip"
     }
@@ -422,6 +424,49 @@ function Clear-GeneratedDirectoryContents {
     }
 }
 
+function Clear-PackageDirectoryPreservingData {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$AllowedParent
+    )
+
+    $safePath = Assert-GeneratedPath $Path $AllowedParent
+    if (-not (Test-Path -LiteralPath $safePath -PathType Container)) {
+        return
+    }
+
+    foreach ($item in Get-ChildItem -LiteralPath $safePath -Force) {
+        if ($item.PSIsContainer -and
+            $item.Name.Equals('data', [StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+        Remove-Item -LiteralPath $item.FullName -Recurse -Force
+    }
+}
+
+function Sync-PortablePackage {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][string]$AllowedParent
+    )
+
+    $sourcePath = [IO.Path]::GetFullPath($Source)
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Container)) {
+        throw "ERROR: portable staging directory was not found: $sourcePath"
+    }
+    if (Test-Path -LiteralPath (Join-Path $sourcePath 'data')) {
+        throw "ERROR: portable staging must not contain a data directory: $sourcePath"
+    }
+
+    $destinationPath = Assert-GeneratedPath $Destination $AllowedParent
+    Clear-PackageDirectoryPreservingData -Path $destinationPath -AllowedParent $AllowedParent
+    New-Item -ItemType Directory -Path $destinationPath -Force | Out-Null
+    foreach ($item in Get-ChildItem -LiteralPath $sourcePath -Force) {
+        Copy-Item -LiteralPath $item.FullName -Destination $destinationPath -Recurse -Force
+    }
+}
+
 function Clear-BuildConfiguration {
     param([Parameter(Mandatory)]$Context)
 
@@ -441,9 +486,12 @@ function Clear-PackageArtifacts {
     param([Parameter(Mandatory)]$Context)
 
     $distRoot = Join-Path $Context.RepositoryRoot 'dist'
+    $buildRoot = Join-Path $Context.RepositoryRoot 'build'
     New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
-    Remove-GeneratedDirectory $Context.PackageDirectory $distRoot
+    Clear-PackageDirectoryPreservingData $Context.PackageDirectory $distRoot
     Remove-GeneratedFile $Context.PackageArchive $distRoot
+    Remove-GeneratedDirectory $Context.PackageStagingDirectory $buildRoot
+    Remove-GeneratedDirectory $Context.PackageSmokeDirectory $buildRoot
 }
 
 function Invoke-CheckedProcess {
@@ -482,6 +530,7 @@ function Assert-PackageBuildOutputs {
         (Join-Path $Context.BuildOutput 'LiangWenPeak.exe'),
         (Join-Path $Context.BuildOutput 'LiangWenPeak.App.exe'),
         (Join-Path $Context.BuildOutput 'App.xbf'),
+        (Join-Path $Context.BuildOutput 'ApiSettingsWindow.xbf'),
         (Join-Path $Context.BuildOutput 'MainWindow.xbf'),
         (Join-Path $Context.BuildOutput 'LiangWenPeak.pri')
     )
@@ -532,6 +581,7 @@ function Assert-PortablePackage {
         (Join-Path $PackageDirectory 'current.txt'),
         (Join-Path $applicationDirectory 'LiangWenPeak.App.exe'),
         (Join-Path $applicationDirectory 'App.xbf'),
+        (Join-Path $applicationDirectory 'ApiSettingsWindow.xbf'),
         (Join-Path $applicationDirectory 'MainWindow.xbf'),
         (Join-Path $applicationDirectory 'LiangWenPeak.pri'),
         (Join-Path $applicationDirectory 'Microsoft.WindowsAppRuntime.dll'),
@@ -546,6 +596,11 @@ function Assert-PortablePackage {
     $xamlDirectory = Join-Path $applicationDirectory 'Microsoft.UI.Xaml'
     if (-not (Test-Path -LiteralPath $xamlDirectory -PathType Container)) {
         throw "ERROR: package validation failed; runtime directory is missing: $xamlDirectory"
+    }
+
+    $dataDirectory = Join-Path $PackageDirectory 'data'
+    if (Test-Path -LiteralPath $dataDirectory) {
+        throw "ERROR: package validation found a runtime data directory: $dataDirectory"
     }
 
     $currentVersion = [IO.File]::ReadAllText((Join-Path $PackageDirectory 'current.txt')).Trim()

@@ -6,8 +6,16 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="BalanceStatisticsTests.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
     <ClCompile Include="PricingScheduleServiceTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="BalanceStatisticsTests.h">
+      <Filter>Tests</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

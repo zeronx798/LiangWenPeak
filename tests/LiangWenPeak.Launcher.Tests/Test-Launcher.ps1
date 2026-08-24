@@ -8,7 +8,9 @@ param(
 
     [switch]$SkipStage,
 
-    [switch]$SmokeOnly
+    [switch]$SmokeOnly,
+
+    [string]$DistributionRoot
 )
 
 Set-StrictMode -Version Latest
@@ -192,7 +194,11 @@ if (-not $SkipStage) {
     }
 }
 
-$distributionRoot = $context.PackageDirectory
+$distributionRoot = if ([string]::IsNullOrWhiteSpace($DistributionRoot)) {
+    $context.PackageDirectory
+} else {
+    [IO.Path]::GetFullPath($DistributionRoot)
+}
 $launcherSource = Join-Path $distributionRoot 'LiangWenPeak.exe'
 $currentSource = Join-Path $distributionRoot 'current.txt'
 if (-not (Test-Path -LiteralPath $launcherSource -PathType Leaf) -or
