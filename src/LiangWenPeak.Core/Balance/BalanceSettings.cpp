@@ -23,7 +23,7 @@ namespace liangwenpeak::balance
         }
     }
 
-    ApiSettingsDraft::ApiSettingsDraft(BalanceSettings persistedSettings, bool const hasApiKey)
+    SettingsDraft::SettingsDraft(BalanceSettings persistedSettings, bool const hasApiKey)
         : m_persisted(std::move(persistedSettings)),
           m_settings(m_persisted),
           m_hasApiKey(hasApiKey)
@@ -32,37 +32,37 @@ namespace liangwenpeak::balance
         m_settings = m_persisted;
     }
 
-    BalanceSettings const& ApiSettingsDraft::Settings() const noexcept
+    BalanceSettings const& SettingsDraft::Settings() const noexcept
     {
         return m_settings;
     }
 
-    BalanceSettings& ApiSettingsDraft::Settings() noexcept
+    BalanceSettings& SettingsDraft::Settings() noexcept
     {
         return m_settings;
     }
 
-    ApiKeyDraftAction ApiSettingsDraft::KeyAction() const noexcept
+    ApiKeyDraftAction SettingsDraft::KeyAction() const noexcept
     {
         return m_keyAction;
     }
 
-    bool ApiSettingsDraft::PersistedHasApiKey() const noexcept
+    bool SettingsDraft::PersistedHasApiKey() const noexcept
     {
         return m_hasApiKey;
     }
 
-    void ApiSettingsDraft::RequestApiKeyClear() noexcept
+    void SettingsDraft::RequestApiKeyClear() noexcept
     {
         m_keyAction = ApiKeyDraftAction::Clear;
     }
 
-    void ApiSettingsDraft::UndoApiKeyClear() noexcept
+    void SettingsDraft::UndoApiKeyClear() noexcept
     {
         m_keyAction = ApiKeyDraftAction::Keep;
     }
 
-    void ApiSettingsDraft::OnApiKeyInputChanged(bool const hasReplacementText) noexcept
+    void SettingsDraft::OnApiKeyInputChanged(bool const hasReplacementText) noexcept
     {
         if (hasReplacementText)
         {
@@ -74,7 +74,7 @@ namespace liangwenpeak::balance
         }
     }
 
-    void ApiSettingsDraft::SetRefreshInterval(std::chrono::minutes const interval)
+    void SettingsDraft::SetRefreshInterval(std::chrono::minutes const interval)
     {
         if (!time::IsSupportedBalanceRefreshInterval(interval))
         {
@@ -87,7 +87,7 @@ namespace liangwenpeak::balance
         }
     }
 
-    void ApiSettingsDraft::SetRateWindow(std::chrono::seconds const window)
+    void SettingsDraft::SetRateWindow(std::chrono::seconds const window)
     {
         if (!IsSupportedRateWindow(window) || window < m_settings.refreshInterval)
         {
@@ -96,7 +96,7 @@ namespace liangwenpeak::balance
         m_settings.rateWindow = window;
     }
 
-    void ApiSettingsDraft::Cancel()
+    void SettingsDraft::Cancel()
     {
         m_settings = m_persisted;
         m_keyAction = ApiKeyDraftAction::Keep;
@@ -130,6 +130,7 @@ namespace liangwenpeak::balance
 
     void NormalizeBalanceSettings(BalanceSettings& settings)
     {
+        notifications::NormalizeNotificationSettings(settings.notifications);
         if (!time::IsSupportedBalanceRefreshInterval(settings.refreshInterval))
         {
             settings.refreshInterval = time::DefaultBalanceRefreshInterval;

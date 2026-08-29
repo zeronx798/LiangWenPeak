@@ -57,6 +57,7 @@ namespace liangwenpeak::viewmodels
         }
         m_state.apiFeatureEnabled = m_settings.apiFeatureEnabled;
         m_state.forecastEnabled = m_settings.forecastEnabled;
+        m_state.notificationEnabled = m_settings.notifications.enabled;
         m_state.hasApiKey = m_credentialService->HasApiKey();
         UpdateClock();
     }
@@ -196,9 +197,9 @@ namespace liangwenpeak::viewmodels
         UpdateBalancePresentation(std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
     }
 
-    balance::ApiSettingsDraft MainViewModel::CreateSettingsDraft() const
+    balance::SettingsDraft MainViewModel::CreateSettingsDraft() const
     {
-        return balance::ApiSettingsDraft{ m_settings, m_credentialService->HasApiKey() };
+        return balance::SettingsDraft{ m_settings, m_credentialService->HasApiKey() };
     }
 
     SettingsCommitResult MainViewModel::CommitSettings(
@@ -284,6 +285,7 @@ namespace liangwenpeak::viewmodels
         }
         m_state.apiFeatureEnabled = m_settings.apiFeatureEnabled;
         m_state.forecastEnabled = m_settings.forecastEnabled;
+        m_state.notificationEnabled = m_settings.notifications.enabled;
         m_state.hasApiKey = m_credentialService->HasApiKey();
         UpdateBalancePresentation(now);
 
@@ -292,6 +294,10 @@ namespace liangwenpeak::viewmodels
         result.scheduleChanged = keyChanged
             || previousSettings.apiFeatureEnabled != m_settings.apiFeatureEnabled
             || previousSettings.refreshInterval != m_settings.refreshInterval;
+        result.notificationScheduleChanged =
+            previousSettings.notifications.enabled != m_settings.notifications.enabled
+            || previousSettings.notifications.advanceEnabled != m_settings.notifications.advanceEnabled
+            || previousSettings.notifications.advanceMinutes != m_settings.notifications.advanceMinutes;
         if (m_settings.apiFeatureEnabled && m_state.hasApiKey)
         {
             if (keyAction == balance::ApiKeyDraftAction::Replace)
@@ -319,6 +325,35 @@ namespace liangwenpeak::viewmodels
         m_state.forecastEnabled = enabled;
         UpdateBalancePresentation(std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now()));
         return true;
+    }
+
+    bool MainViewModel::SetNotificationEnabled(bool const enabled)
+    {
+        auto updated = m_settings;
+        updated.notifications.enabled = enabled;
+        if (!m_settingsService->SaveBalanceSettings(updated))
+        {
+            return false;
+        }
+        m_settings = std::move(updated);
+        m_state.notificationEnabled = enabled;
+        return true;
+    }
+
+    void MainViewModel::ReloadPersistedStateAfterCleanup(std::chrono::sys_seconds const now)
+    {
+        ++m_refreshGeneration;
+        m_pendingObservationReason.reset();
+        m_state.isRefreshing = false;
+        m_settings = m_settingsService->LoadBalanceSettings();
+        ResetObservationState();
+        m_lastRefreshFailed = false;
+        m_historyWriteFailed = false;
+        m_state.apiFeatureEnabled = m_settings.apiFeatureEnabled;
+        m_state.forecastEnabled = m_settings.forecastEnabled;
+        m_state.notificationEnabled = m_settings.notifications.enabled;
+        m_state.hasApiKey = m_credentialService->HasApiKey();
+        UpdateClock(now);
     }
 
     bool MainViewModel::ResetStatistics(std::chrono::sys_seconds const now)
@@ -360,6 +395,7 @@ namespace liangwenpeak::viewmodels
     {
         m_state.apiFeatureEnabled = m_settings.apiFeatureEnabled;
         m_state.forecastEnabled = m_settings.forecastEnabled;
+        m_state.notificationEnabled = m_settings.notifications.enabled;
         m_state.hasApiKey = m_credentialService->HasApiKey();
         m_state.hasSuccessfulObservation = m_lastObservationTime.has_value();
 

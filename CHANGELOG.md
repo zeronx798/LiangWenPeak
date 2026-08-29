@@ -1,5 +1,39 @@
 # 更新日志
 
+## 1.1.2（开发中）
+
+新增峰谷 Toast 通知，并将原“API Key 功能”窗口升级为统一的“设置”窗口。
+
+### 亮点
+
+* 通知默认关闭；启用后可在每次真实峰谷切换到达时发送通知，并默认提前 10 分钟提醒
+* 提前提醒可单独关闭，提前分钟数可在 `1–30` 之间按整数配置
+* 通知调度复用 `PricingScheduleService` 的下一次真实状态变化，不在周末产生伪切换，并正确跨越周五至周一
+* 提前提醒错过后不补发；到达提醒允许在真实切换后的 15 分钟内补发一次
+* 通知身份按 transition timestamp 与类型持久化去重，避免 Timer 重入、恢复、重新激活或重启造成重复通知
+* 主菜单新增“启用通知”即时快捷开关；设置窗口中的通知选项仍遵循完整 Draft、保存与取消事务
+* “测试通知”始终可用且立即执行，不受通知总开关或设置草稿约束
+* Toast backend 改用 Windows 官方 classic WinRT `Windows.UI.Notifications`，不依赖 Windows App SDK Singleton、额外 MSIX、installer 或第三方框架
+* 使用固定 AUMID `zeronx798.LiangWenPeak` 与 per-user Start Menu shortcut 建立 unpackaged desktop identity；快捷方式始终指向 portable 根 Launcher，并可在目录移动后自动修复
+* classic Toast 横幅已完成 Windows 实机人工验证，测试通知可以正常显示
+* portable Toast 自动化始终严格验证隔离通知历史中的标题与正文；专注/勿扰或当前桌面未向 UI Automation 暴露横幅时，仅跳过横幅层并给出明确提示
+* 最终 ZIP 的 About 已在 100%、150%、200% DPI 下完成人工视觉验收，“版本 1.1.2”均完整清晰可见；此前裁切报告确认为 UI Automation 检测误报，并非实际 UI regression
+* 主菜单“设置...”改用 WinUI 原生 `SymbolIcon` 的 `Setting` 齿轮图标，移除旧 API Key 入口遗留的钥匙图标
+* 设置窗口新增“危险区 / 彻底清理”，精确清除应用拥有的 Credential Locker、Registry、Toast shortcut 与受支持的通知历史，同时明确保留全部 `data/`
+* 清理确认后立即销毁旧 Draft、从中央 defaults 重建 UI；partial failure 不回滚凭据，也不会让随后 Save 复活旧状态
+* integration、UI、Launcher 与 portable Toast 验证使用每次运行唯一 GUID，隔离 Registry、Credential、AUMID、shortcut、portable data 与明确 PID，并在 teardown 中只清理该 TestRunId
+* portable payload 使用与应用资源映射名一致的 `LiangWenPeak.App.pri` 并加载官方 `XamlControlsResources`，确保原生 `NumberBox` 在 Launcher 与最终 ZIP 中可用
+
+### 下载
+
+`LiangWenPeak-1.1.2-windows-x64.zip`
+
+SHA256：
+
+```text
+1A51C58CA91551553670C05339BD5D0929647B63643FF2801F7F64F1D15FF4D9
+```
+
 ## 1.1.1
 
 新增 Windows 11 Fluent Theme 视觉适配。

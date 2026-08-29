@@ -11,21 +11,33 @@ namespace winrt::LiangWenPeak::implementation
 {
     struct ApiSettingsWindow : ApiSettingsWindowT<ApiSettingsWindow>
     {
+        struct CleanupResetState
+        {
+            liangwenpeak::balance::SettingsDraft draft;
+            bool fluentThemeEnabled = false;
+            bool succeeded = false;
+            winrt::hstring statusMessage;
+        };
+
         using SaveCallback = std::function<bool(
             liangwenpeak::balance::BalanceSettings,
             liangwenpeak::balance::ApiKeyDraftAction,
             winrt::hstring const&)>;
         using ResetCallback = std::function<bool()>;
+        using TestNotificationCallback = std::function<winrt::hstring()>;
+        using CleanupCallback = std::function<std::optional<CleanupResetState>()>;
         using ClosedCallback = std::function<void()>;
 
         ApiSettingsWindow();
 
         void InitializeOwned(
             HWND owner,
-            liangwenpeak::balance::ApiSettingsDraft draft,
+            liangwenpeak::balance::SettingsDraft draft,
             bool fluentThemeEnabled,
             SaveCallback saveCallback,
             ResetCallback resetCallback,
+            TestNotificationCallback testNotificationCallback,
+            CleanupCallback cleanupCallback,
             ClosedCallback closedCallback);
         void ShowOwned();
         void CloseFromOwner() noexcept;
@@ -48,6 +60,15 @@ namespace winrt::LiangWenPeak::implementation
         void OnAlgorithmChanged(
             Windows::Foundation::IInspectable const& sender,
             Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args);
+        void OnNotificationEnabledToggled(
+            Windows::Foundation::IInspectable const& sender,
+            Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnAdvanceReminderToggled(
+            Windows::Foundation::IInspectable const& sender,
+            Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnTestNotificationClick(
+            Windows::Foundation::IInspectable const& sender,
+            Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnSaveClick(
             Windows::Foundation::IInspectable const& sender,
             Microsoft::UI::Xaml::RoutedEventArgs const& args);
@@ -55,6 +76,9 @@ namespace winrt::LiangWenPeak::implementation
             Windows::Foundation::IInspectable const& sender,
             Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnResetStatisticsClick(
+            Windows::Foundation::IInspectable const& sender,
+            Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnCleanupClick(
             Windows::Foundation::IInspectable const& sender,
             Microsoft::UI::Xaml::RoutedEventArgs const& args);
 
@@ -66,19 +90,24 @@ namespace winrt::LiangWenPeak::implementation
         void PopulateRateWindows();
         void UpdateAlgorithmControl();
         void UpdateApiKeyClearPresentation();
+        void UpdateNotificationControlState();
         void LoadWarningForCurrency();
         [[nodiscard]] bool CaptureCurrentWarning();
+        [[nodiscard]] bool CaptureNotificationSettings();
         [[nodiscard]] std::string SelectedCurrency();
         [[nodiscard]] std::chrono::minutes SelectedRefreshInterval();
         [[nodiscard]] std::chrono::seconds SelectedRateWindow();
         winrt::fire_and_forget ConfirmResetStatisticsAsync();
+        winrt::fire_and_forget ConfirmCleanupAsync();
         void OnWindowClosed(
             Windows::Foundation::IInspectable const& sender,
             Microsoft::UI::Xaml::WindowEventArgs const& args);
 
-        std::optional<liangwenpeak::balance::ApiSettingsDraft> m_draft;
+        std::optional<liangwenpeak::balance::SettingsDraft> m_draft;
         SaveCallback m_saveCallback;
         ResetCallback m_resetCallback;
+        TestNotificationCallback m_testNotificationCallback;
+        CleanupCallback m_cleanupCallback;
         ClosedCallback m_closedCallback;
         std::vector<std::chrono::seconds> m_availableRateWindows;
         std::string m_editingCurrency;

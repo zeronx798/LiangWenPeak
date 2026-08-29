@@ -40,10 +40,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="BalanceStatisticsTests.cpp" />
+    <ClCompile Include="NotificationTests.cpp" />
     <ClCompile Include="PricingScheduleServiceTests.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BalanceStatisticsTests.h" />
+    <ClInclude Include="NotificationTests.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\LiangWenPeak.Core\LiangWenPeak.Core.vcxproj">

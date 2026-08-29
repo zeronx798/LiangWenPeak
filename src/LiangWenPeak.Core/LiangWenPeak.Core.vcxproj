@@ -43,6 +43,8 @@
     <ClInclude Include="Balance\DecimalAmount.h" />
     <ClInclude Include="Balance\DeploymentPaths.h" />
     <ClInclude Include="Balance\SeriesIdentity.h" />
+    <ClInclude Include="Notifications\NotificationScheduler.h" />
+    <ClInclude Include="Notifications\NotificationSettings.h" />
     <ClInclude Include="Pricing\PricingScheduleService.h" />
     <ClInclude Include="Time\BalanceRefreshSchedule.h" />
     <ClInclude Include="Time\BeijingTime.h" />
@@ -57,6 +59,8 @@
     <ClCompile Include="Balance\DecimalAmount.cpp" />
     <ClCompile Include="Balance\DeploymentPaths.cpp" />
     <ClCompile Include="Balance\SeriesIdentity.cpp" />
+    <ClCompile Include="Notifications\NotificationScheduler.cpp" />
+    <ClCompile Include="Notifications\NotificationSettings.cpp" />
     <ClCompile Include="Pricing\PricingScheduleService.cpp" />
     <ClCompile Include="Time\BalanceRefreshSchedule.cpp" />
     <ClCompile Include="Time\BeijingTime.cpp" />

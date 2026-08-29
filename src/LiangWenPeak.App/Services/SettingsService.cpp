@@ -2,6 +2,7 @@
 #include "SettingsService.h"
 
 #include <charconv>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -12,7 +13,6 @@ namespace liangwenpeak::services
 {
     namespace
     {
-        constexpr wchar_t SettingsPath[] = L"Software\\LiangWenPeak";
         constexpr wchar_t ApiFeatureEnabledName[] = L"ApiFeatureEnabled";
         constexpr wchar_t ForecastEnabledName[] = L"BalanceForecastEnabled";
         constexpr wchar_t SelectedCurrencyName[] = L"SelectedCurrency";
@@ -21,14 +21,23 @@ namespace liangwenpeak::services
         constexpr wchar_t PreferredAlgorithmName[] = L"PreferredPredictionAlgorithm";
         constexpr wchar_t WarningBalancesName[] = L"WarningBalances";
         constexpr wchar_t KnownCurrenciesName[] = L"KnownCurrencies";
+        constexpr wchar_t NotificationEnabledName[] = L"NotificationEnabled";
+        constexpr wchar_t NotificationAdvanceEnabledName[] = L"NotificationAdvanceEnabled";
+        constexpr wchar_t NotificationAdvanceMinutesName[] = L"NotificationAdvanceMinutes";
+        constexpr wchar_t LastAdvanceNotificationTransitionName[] =
+            L"LastAdvanceNotificationTransitionUnixSeconds";
+        constexpr wchar_t LastArrivedNotificationTransitionName[] =
+            L"LastArrivedNotificationTransitionUnixSeconds";
 
-        std::optional<DWORD> ReadDword(wchar_t const* const name) noexcept
+        std::optional<DWORD> ReadDword(
+            std::wstring const& settingsPath,
+            wchar_t const* const name) noexcept
         {
             DWORD value{};
             DWORD size = sizeof(value);
             if (::RegGetValueW(
                 HKEY_CURRENT_USER,
-                SettingsPath,
+                settingsPath.c_str(),
                 name,
                 RRF_RT_REG_DWORD,
                 nullptr,
@@ -40,12 +49,14 @@ namespace liangwenpeak::services
             return value;
         }
 
-        std::optional<std::wstring> ReadString(wchar_t const* const name) noexcept
+        std::optional<std::wstring> ReadString(
+            std::wstring const& settingsPath,
+            wchar_t const* const name) noexcept
         {
             DWORD size{};
             if (::RegGetValueW(
                 HKEY_CURRENT_USER,
-                SettingsPath,
+                settingsPath.c_str(),
                 name,
                 RRF_RT_REG_SZ,
                 nullptr,
@@ -59,7 +70,7 @@ namespace liangwenpeak::services
             std::vector<wchar_t> buffer(size / sizeof(wchar_t));
             if (::RegGetValueW(
                 HKEY_CURRENT_USER,
-                SettingsPath,
+                settingsPath.c_str(),
                 name,
                 RRF_RT_REG_SZ,
                 nullptr,
@@ -69,6 +80,26 @@ namespace liangwenpeak::services
                 return std::nullopt;
             }
             return std::wstring{ buffer.data() };
+        }
+
+        std::optional<ULONGLONG> ReadQword(
+            std::wstring const& settingsPath,
+            wchar_t const* const name) noexcept
+        {
+            ULONGLONG value{};
+            DWORD size = sizeof(value);
+            if (::RegGetValueW(
+                HKEY_CURRENT_USER,
+                settingsPath.c_str(),
+                name,
+                RRF_RT_REG_QWORD,
+                nullptr,
+                &value,
+                &size) != ERROR_SUCCESS)
+            {
+                return std::nullopt;
+            }
+            return value;
         }
 
         bool WriteDword(HKEY const key, wchar_t const* const name, DWORD const value) noexcept
@@ -91,6 +122,28 @@ namespace liangwenpeak::services
                 REG_SZ,
                 reinterpret_cast<BYTE const*>(value.c_str()),
                 static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+        }
+
+        bool WriteQword(HKEY const key, wchar_t const* const name, ULONGLONG const value) noexcept
+        {
+            return ::RegSetValueExW(
+                key,
+                name,
+                0,
+                REG_QWORD,
+                reinterpret_cast<BYTE const*>(&value),
+                sizeof(value)) == ERROR_SUCCESS;
+        }
+
+        std::optional<std::chrono::sys_seconds> ParseTransitionTimestamp(
+            std::optional<ULONGLONG> const value) noexcept
+        {
+            if (!value || *value > static_cast<ULONGLONG>((std::numeric_limits<std::int64_t>::max)()))
+            {
+                return std::nullopt;
+            }
+            return std::chrono::sys_seconds{
+                std::chrono::seconds{ static_cast<std::int64_t>(*value) } };
         }
 
         std::wstring SerializeWarnings(balance::BalanceSettings const& settings)
@@ -188,42 +241,59 @@ namespace liangwenpeak::services
         }
     }
 
+    SettingsService::SettingsService(StateProfile const& profile)
+        : m_settingsPath(profile.RegistrySubkey())
+    {
+    }
+
     balance::BalanceSettings SettingsService::LoadBalanceSettings() const noexcept
     {
         balance::BalanceSettings settings;
         try
         {
-            if (const auto value = ReadDword(ApiFeatureEnabledName))
+            if (const auto value = ReadDword(m_settingsPath, ApiFeatureEnabledName))
             {
                 settings.apiFeatureEnabled = *value != 0;
             }
-            if (const auto value = ReadDword(ForecastEnabledName))
+            if (const auto value = ReadDword(m_settingsPath, ForecastEnabledName))
             {
                 settings.forecastEnabled = *value != 0;
             }
-            if (const auto value = ReadString(SelectedCurrencyName))
+            if (const auto value = ReadString(m_settingsPath, SelectedCurrencyName))
             {
                 settings.selectedCurrency = winrt::to_string(*value);
             }
-            if (const auto value = ReadDword(BalanceRefreshIntervalName))
+            if (const auto value = ReadDword(m_settingsPath, BalanceRefreshIntervalName))
             {
                 settings.refreshInterval = std::chrono::minutes{ *value };
             }
-            if (const auto value = ReadDword(RateWindowName))
+            if (const auto value = ReadDword(m_settingsPath, RateWindowName))
             {
                 settings.rateWindow = std::chrono::seconds{ *value };
             }
-            if (const auto value = ReadDword(PreferredAlgorithmName); value && *value <= 2)
+            if (const auto value = ReadDword(m_settingsPath, PreferredAlgorithmName); value && *value <= 2)
             {
                 settings.preferredAlgorithm = static_cast<balance::PredictionAlgorithm>(*value);
             }
-            if (const auto value = ReadString(WarningBalancesName))
+            if (const auto value = ReadString(m_settingsPath, WarningBalancesName))
             {
                 ParseWarnings(*value, settings);
             }
-            if (const auto value = ReadString(KnownCurrenciesName))
+            if (const auto value = ReadString(m_settingsPath, KnownCurrenciesName))
             {
                 settings.knownCurrencies = ParseCurrencies(*value);
+            }
+            if (const auto value = ReadDword(m_settingsPath, NotificationEnabledName))
+            {
+                settings.notifications.enabled = *value != 0;
+            }
+            if (const auto value = ReadDword(m_settingsPath, NotificationAdvanceEnabledName))
+            {
+                settings.notifications.advanceEnabled = *value != 0;
+            }
+            if (const auto value = ReadDword(m_settingsPath, NotificationAdvanceMinutesName))
+            {
+                settings.notifications.advanceMinutes = std::chrono::minutes{ *value };
             }
             balance::NormalizeBalanceSettings(settings);
         }
@@ -243,7 +313,7 @@ namespace liangwenpeak::services
             HKEY key{};
             if (::RegCreateKeyExW(
                 HKEY_CURRENT_USER,
-                SettingsPath,
+                m_settingsPath.c_str(),
                 0,
                 nullptr,
                 REG_OPTION_NON_VOLATILE,
@@ -262,7 +332,16 @@ namespace liangwenpeak::services
                 && WriteDword(key, RateWindowName, static_cast<DWORD>(settings.rateWindow.count()))
                 && WriteDword(key, PreferredAlgorithmName, static_cast<DWORD>(settings.preferredAlgorithm))
                 && WriteString(key, WarningBalancesName, SerializeWarnings(settings))
-                && WriteString(key, KnownCurrenciesName, SerializeCurrencies(settings.knownCurrencies));
+                && WriteString(key, KnownCurrenciesName, SerializeCurrencies(settings.knownCurrencies))
+                && WriteDword(key, NotificationEnabledName, settings.notifications.enabled ? 1U : 0U)
+                && WriteDword(
+                    key,
+                    NotificationAdvanceEnabledName,
+                    settings.notifications.advanceEnabled ? 1U : 0U)
+                && WriteDword(
+                    key,
+                    NotificationAdvanceMinutesName,
+                    static_cast<DWORD>(settings.notifications.advanceMinutes.count()));
             ::RegCloseKey(key);
             return saved;
         }
@@ -296,5 +375,82 @@ namespace liangwenpeak::services
         auto settings = LoadBalanceSettings();
         settings.refreshInterval = interval;
         return SaveBalanceSettings(settings);
+    }
+
+    notifications::NotificationDeliveryState
+        SettingsService::LoadNotificationDeliveryState() const noexcept
+    {
+        notifications::NotificationDeliveryState state;
+        try
+        {
+            state.lastAdvanceTransition = ParseTransitionTimestamp(
+                ReadQword(m_settingsPath, LastAdvanceNotificationTransitionName));
+            state.lastArrivedTransition = ParseTransitionTimestamp(
+                ReadQword(m_settingsPath, LastArrivedNotificationTransitionName));
+        }
+        catch (...)
+        {
+            state = {};
+        }
+        return state;
+    }
+
+    bool SettingsService::SaveNotificationDeliveryState(
+        notifications::NotificationDeliveryState const& state) const noexcept
+    {
+        try
+        {
+            HKEY key{};
+            if (::RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                m_settingsPath.c_str(),
+                0,
+                nullptr,
+                REG_OPTION_NON_VOLATILE,
+                KEY_SET_VALUE,
+                nullptr,
+                &key,
+                nullptr) != ERROR_SUCCESS)
+            {
+                return false;
+            }
+
+            bool saved = true;
+            if (state.lastAdvanceTransition)
+            {
+                saved = WriteQword(
+                    key,
+                    LastAdvanceNotificationTransitionName,
+                    static_cast<ULONGLONG>(
+                        state.lastAdvanceTransition->time_since_epoch().count())) && saved;
+            }
+            if (state.lastArrivedTransition)
+            {
+                saved = WriteQword(
+                    key,
+                    LastArrivedNotificationTransitionName,
+                    static_cast<ULONGLONG>(
+                        state.lastArrivedTransition->time_since_epoch().count())) && saved;
+            }
+            ::RegCloseKey(key);
+            return saved;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool SettingsService::DeleteAllSettings() const noexcept
+    {
+        const auto result = ::RegDeleteTreeW(HKEY_CURRENT_USER, m_settingsPath.c_str());
+        return result == ERROR_SUCCESS
+            || result == ERROR_FILE_NOT_FOUND
+            || result == ERROR_PATH_NOT_FOUND;
+    }
+
+    std::wstring const& SettingsService::RegistrySubkey() const noexcept
+    {
+        return m_settingsPath;
     }
 }

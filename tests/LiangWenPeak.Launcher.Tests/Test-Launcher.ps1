@@ -41,67 +41,52 @@ function Write-Utf8WithoutBom([string]$path, [string]$contents) {
     [IO.File]::WriteAllText($path, $contents, [Text.UTF8Encoding]::new($false))
 }
 
-function Get-ApplicationProcesses([string]$expectedPath) {
-    $fullExpectedPath = [IO.Path]::GetFullPath($expectedPath)
-    $matches = @()
-    foreach ($process in Get-Process -Name 'LiangWenPeak.App' -ErrorAction SilentlyContinue) {
-        try {
-            if ([IO.Path]::GetFullPath($process.Path).Equals($fullExpectedPath, [StringComparison]::OrdinalIgnoreCase)) {
-                $matches += $process
-            }
-        } catch {
-            # A process can exit between enumeration and reading its executable path.
-        }
-    }
-    return $matches
-}
-
-function Stop-ApplicationProcess([Diagnostics.Process]$process) {
-    if ($process.HasExited) {
-        return
-    }
-
-    $process.Refresh()
-    if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
-        [void]$process.CloseMainWindow()
-    }
-
-    if (-not $process.WaitForExit(5000)) {
-        $process.Kill()
-        $process.WaitForExit()
-    }
-}
-
 function Invoke-SuccessScenario(
+    $profile,
     [string]$name,
     [string]$launcherPath,
     [string]$applicationPath,
     [string]$workingDirectory) {
 
-    $beforeIds = @(Get-ApplicationProcesses $applicationPath | ForEach-Object Id)
-    $launcher = Start-Process -FilePath $launcherPath -WorkingDirectory $workingDirectory -PassThru
+    $fullApplicationPath = [IO.Path]::GetFullPath($applicationPath)
+    $launcher = Start-IsolatedTestProcess `
+        -Profile $profile `
+        -FilePath $launcherPath `
+        -WorkingDirectory $workingDirectory
+    $childProcessId = $null
+    $childDeadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        $candidate = Get-CimInstance Win32_Process `
+            -Filter "ParentProcessId = $($launcher.Id)" `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_.ExecutablePath) -and
+                [IO.Path]::GetFullPath($_.ExecutablePath).Equals(
+                    $fullApplicationPath,
+                    [StringComparison]::OrdinalIgnoreCase)
+            } |
+            Select-Object -First 1
+        if ($null -ne $candidate) {
+            $childProcessId = [int]$candidate.ProcessId
+            break
+        }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $childDeadline)
+
     if (-not $launcher.WaitForExit(10000)) {
-        $launcher.Kill()
+        Stop-IsolatedTestProcess -Profile $profile -Process $launcher
         throw "$name failed: the launcher did not exit immediately."
     }
+    [void]$profile.OwnedProcessIds.Remove($launcher.Id)
     if ($launcher.ExitCode -ne 0) {
         throw "$name failed: launcher exit code $($launcher.ExitCode)."
     }
 
-    $deadline = [DateTime]::UtcNow.AddSeconds(15)
-    $application = $null
-    while ([DateTime]::UtcNow -lt $deadline -and $null -eq $application) {
-        $application = Get-ApplicationProcesses $applicationPath |
-            Where-Object { $beforeIds -notcontains $_.Id } |
-            Select-Object -First 1
-        if ($null -eq $application) {
-            Start-Sleep -Milliseconds 100
-        }
-    }
-
-    if ($null -eq $application) {
+    if ($null -eq $childProcessId) {
         throw "$name failed: LiangWenPeak.App.exe did not start from the expected directory."
     }
+    $application = [Diagnostics.Process]::GetProcessById($childProcessId)
+    [void]$profile.OwnedProcessIds.Add($application.Id)
 
     $windowDeadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
@@ -136,6 +121,7 @@ function Get-WindowAutomationText([IntPtr]$windowHandle) {
 }
 
 function Invoke-ErrorScenario(
+    $profile,
     [string]$name,
     [string]$fixtureRoot,
     [string]$launcherSource,
@@ -146,7 +132,10 @@ function Invoke-ErrorScenario(
     Copy-Item -LiteralPath $launcherSource -Destination (Join-Path $fixtureRoot 'LiangWenPeak.exe') -Force
     & $arrange $fixtureRoot
 
-    $process = Start-Process -FilePath (Join-Path $fixtureRoot 'LiangWenPeak.exe') -WorkingDirectory 'C:\' -PassThru
+    $process = Start-IsolatedTestProcess `
+        -Profile $profile `
+        -FilePath (Join-Path $fixtureRoot 'LiangWenPeak.exe') `
+        -WorkingDirectory 'C:\'
     try {
         $deadline = [DateTime]::UtcNow.AddSeconds(10)
         do {
@@ -165,13 +154,7 @@ function Invoke-ErrorScenario(
             throw "$name failed: expected '$expectedMessage', got '$dialogText'."
         }
     } finally {
-        if (-not $process.HasExited) {
-            [void]$process.CloseMainWindow()
-            if (-not $process.WaitForExit(5000)) {
-                $process.Kill()
-                $process.WaitForExit()
-            }
-        }
+        Stop-IsolatedTestProcess -Profile $profile -Process $process
     }
 
     if ($process.ExitCode -eq 0) {
@@ -199,9 +182,9 @@ $distributionRoot = if ([string]::IsNullOrWhiteSpace($DistributionRoot)) {
 } else {
     [IO.Path]::GetFullPath($DistributionRoot)
 }
-$launcherSource = Join-Path $distributionRoot 'LiangWenPeak.exe'
+$distributionLauncher = Join-Path $distributionRoot 'LiangWenPeak.exe'
 $currentSource = Join-Path $distributionRoot 'current.txt'
-if (-not (Test-Path -LiteralPath $launcherSource -PathType Leaf) -or
+if (-not (Test-Path -LiteralPath $distributionLauncher -PathType Leaf) -or
     -not (Test-Path -LiteralPath $currentSource -PathType Leaf)) {
     throw 'The staged launcher layout was not found. Run scripts\package.ps1 first.'
 }
@@ -210,19 +193,29 @@ $version = [IO.File]::ReadAllText($currentSource).Trim()
 if ($version -ne $context.Version) {
     throw "The staged current.txt version '$version' does not match source version '$($context.Version)'."
 }
-$applicationSource = Join-Path $distributionRoot "app-$version\LiangWenPeak.App.exe"
-
-$application = $null
+$normalProfile = New-IsolatedTestProfile `
+    -RepositoryRoot $repositoryRoot `
+    -TestArea 'launcher-smoke'
+Write-Host "ISOLATED_TEST_RUN_ID=$($normalProfile.RunId)"
 try {
-    $application = Invoke-SuccessScenario `
-        'normal staged launch' `
-        $launcherSource `
-        $applicationSource `
-        $distributionRoot
-} finally {
-    if ($null -ne $application) {
-        Stop-ApplicationProcess $application
+    Copy-DirectoryContents $distributionRoot $normalProfile.PortableRoot
+    $launcherSource = Join-Path $normalProfile.PortableRoot 'LiangWenPeak.exe'
+    $applicationSource = Join-Path $normalProfile.PortableRoot "app-$version\LiangWenPeak.App.exe"
+    $application = $null
+    try {
+        $application = Invoke-SuccessScenario `
+            $normalProfile `
+            'normal staged launch' `
+            $launcherSource `
+            $applicationSource `
+            $normalProfile.PortableRoot
+    } finally {
+        if ($null -ne $application) {
+            Stop-IsolatedTestProcess -Profile $normalProfile -Process $application
+        }
     }
+} finally {
+    Remove-IsolatedTestProfile -Profile $normalProfile -RepositoryRoot $repositoryRoot
 }
 
 if ($SmokeOnly) {
@@ -230,81 +223,83 @@ if ($SmokeOnly) {
     return
 }
 
-$testRoot = Join-Path $repositoryRoot "build\launcher-tests\$Configuration"
-Assert-SafeTestDirectory $testRoot $repositoryRoot
-if (Test-Path -LiteralPath $testRoot) {
-    Remove-Item -LiteralPath $testRoot -Recurse -Force
-}
-New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
-
-$spaceRoot = Join-Path $testRoot 'Test Apps\LiangWenPeak'
-Copy-DirectoryContents $distributionRoot $spaceRoot
-$spaceCurrent = Join-Path $spaceRoot 'current.txt'
-[IO.File]::WriteAllText($spaceCurrent, " `t$version`r`n", [Text.UTF8Encoding]::new($true))
-$spaceApplication = Join-Path $spaceRoot "app-$version\LiangWenPeak.App.exe"
-$application = $null
+$fullProfile = New-IsolatedTestProfile `
+    -RepositoryRoot $repositoryRoot `
+    -TestArea 'launcher-full'
+$spaceRoot = Join-Path $fullProfile.RunRoot "Test Apps\LiangWenPeak $($fullProfile.RunId)"
+$fullProfile.PortableRoot = [IO.Path]::GetFullPath($spaceRoot)
+$fullProfile.ExpectedLauncherPath = Join-Path $fullProfile.PortableRoot 'LiangWenPeak.exe'
+Write-Host "ISOLATED_TEST_RUN_ID=$($fullProfile.RunId)"
 try {
-    $application = Invoke-SuccessScenario `
-        'path with spaces and arbitrary working directory' `
-        (Join-Path $spaceRoot 'LiangWenPeak.exe') `
-        $spaceApplication `
-        'C:\'
-} finally {
-    if ($null -ne $application) {
-        Stop-ApplicationProcess $application
+    Copy-DirectoryContents $distributionRoot $spaceRoot
+    $spaceCurrent = Join-Path $spaceRoot 'current.txt'
+    [IO.File]::WriteAllText($spaceCurrent, " `t$version`r`n", [Text.UTF8Encoding]::new($true))
+    $spaceApplication = Join-Path $spaceRoot "app-$version\LiangWenPeak.App.exe"
+    $application = $null
+    try {
+        $application = Invoke-SuccessScenario `
+            $fullProfile `
+            'path with spaces and arbitrary working directory' `
+            (Join-Path $spaceRoot 'LiangWenPeak.exe') `
+            $spaceApplication `
+            'C:\'
+    } finally {
+        if ($null -ne $application) {
+            Stop-IsolatedTestProcess -Profile $fullProfile -Process $application
+        }
     }
-}
 
-$errorRoot = Join-Path $testRoot 'errors'
-Invoke-ErrorScenario `
-    'missing current.txt' `
-    (Join-Path $errorRoot 'missing-current') `
-    $launcherSource `
-    { param($root) } `
-    'current.txt was not found.'
+    $errorRoot = Join-Path $fullProfile.RunRoot 'errors'
+    Invoke-ErrorScenario `
+        $fullProfile `
+        'missing current.txt' `
+        (Join-Path $errorRoot 'missing-current') `
+        $distributionLauncher `
+        { param($root) } `
+        'current.txt was not found.'
 
-Invoke-ErrorScenario `
-    'invalid version traversal' `
-    (Join-Path $errorRoot 'invalid-version') `
-    $launcherSource `
-    { param($root) Write-Utf8WithoutBom (Join-Path $root 'current.txt') "..\other`r`n" } `
-    'current.txt contains an invalid version.'
+    Invoke-ErrorScenario `
+        $fullProfile `
+        'invalid version traversal' `
+        (Join-Path $errorRoot 'invalid-version') `
+        $distributionLauncher `
+        { param($root) Write-Utf8WithoutBom (Join-Path $root 'current.txt') "..\other`r`n" } `
+        'current.txt contains an invalid version.'
 
-Invoke-ErrorScenario `
-    'missing application directory' `
-    (Join-Path $errorRoot 'missing-directory') `
-    $launcherSource `
-    { param($root) Write-Utf8WithoutBom (Join-Path $root 'current.txt') "9.9.9`r`n" } `
-    'Application version directory not found:'
+    Invoke-ErrorScenario `
+        $fullProfile `
+        'missing application directory' `
+        (Join-Path $errorRoot 'missing-directory') `
+        $distributionLauncher `
+        { param($root) Write-Utf8WithoutBom (Join-Path $root 'current.txt') "9.9.9`r`n" } `
+        'Application version directory not found:'
 
-Invoke-ErrorScenario `
-    'missing application executable' `
-    (Join-Path $errorRoot 'missing-executable') `
-    $launcherSource `
-    {
-        param($root)
-        Write-Utf8WithoutBom (Join-Path $root 'current.txt') "1.0.0`r`n"
-        New-Item -ItemType Directory -Path (Join-Path $root 'app-1.0.0') -Force | Out-Null
-    } `
-    'Application executable not found:'
+    Invoke-ErrorScenario `
+        $fullProfile `
+        'missing application executable' `
+        (Join-Path $errorRoot 'missing-executable') `
+        $distributionLauncher `
+        {
+            param($root)
+            Write-Utf8WithoutBom (Join-Path $root 'current.txt') "1.0.0`r`n"
+            New-Item -ItemType Directory -Path (Join-Path $root 'app-1.0.0') -Force | Out-Null
+        } `
+        'Application executable not found:'
 
-Invoke-ErrorScenario `
-    'CreateProcessW failure' `
-    (Join-Path $errorRoot 'invalid-executable') `
-    $launcherSource `
-    {
-        param($root)
-        Write-Utf8WithoutBom (Join-Path $root 'current.txt') "1.0.0`r`n"
-        $appDirectory = Join-Path $root 'app-1.0.0'
-        New-Item -ItemType Directory -Path $appDirectory -Force | Out-Null
-        Write-Utf8WithoutBom (Join-Path $appDirectory 'LiangWenPeak.App.exe') 'not an executable'
-    } `
-    'Could not start LiangWenPeak.App.exe.'
-
-Remove-Item -LiteralPath $testRoot -Recurse -Force
-$testContainer = Split-Path -Parent $testRoot
-if ((Test-Path -LiteralPath $testContainer) -and
-    @(Get-ChildItem -LiteralPath $testContainer -Force).Count -eq 0) {
-    Remove-Item -LiteralPath $testContainer -Force
+    Invoke-ErrorScenario `
+        $fullProfile `
+        'CreateProcessW failure' `
+        (Join-Path $errorRoot 'invalid-executable') `
+        $distributionLauncher `
+        {
+            param($root)
+            Write-Utf8WithoutBom (Join-Path $root 'current.txt') "1.0.0`r`n"
+            $appDirectory = Join-Path $root 'app-1.0.0'
+            New-Item -ItemType Directory -Path $appDirectory -Force | Out-Null
+            Write-Utf8WithoutBom (Join-Path $appDirectory 'LiangWenPeak.App.exe') 'not an executable'
+        } `
+        'Could not start LiangWenPeak.App.exe.'
+} finally {
+    Remove-IsolatedTestProfile -Profile $fullProfile -RepositoryRoot $repositoryRoot
 }
 Write-Host 'All launcher integration tests passed.'

@@ -10,6 +10,11 @@
 
 namespace liangwenpeak::apptheme
 {
+    ThemeManager::ThemeManager(services::StateProfile const& profile) noexcept
+        : m_service(profile)
+    {
+    }
+
     bool ThemeManager::IsFluentThemeAvailable() const noexcept
     {
         return m_service.IsAvailable();
@@ -23,6 +28,11 @@ namespace liangwenpeak::apptheme
     bool ThemeManager::SetFluentThemeEnabled(bool const enabled) noexcept
     {
         return m_service.SetEnabled(enabled);
+    }
+
+    void ThemeManager::Reload() noexcept
+    {
+        m_service.Reload();
     }
 
     void ThemeManager::ApplyToWindow(

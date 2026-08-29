@@ -60,7 +60,8 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <PropertyGroup>
     <AppxPriInitialPath />
-    <ProjectPriFileName>LiangWenPeak.pri</ProjectPriFileName>
+    <!-- MRT Core resolves unpackaged resources from the PRI matching TargetName. -->
+    <ProjectPriFileName>LiangWenPeak.App.pri</ProjectPriFileName>
   </PropertyGroup>
   <ImportGroup Label="ExtensionSettings" />
   <ImportGroup Label="PropertySheets">
@@ -118,10 +119,14 @@
     <ClInclude Include="AppTheme\ThemeManager.h" />
     <ClInclude Include="AppTheme\WindowsVersionDetector.h" />
     <ClInclude Include="Services\CredentialService.h" />
+    <ClInclude Include="Services\CleanupService.h" />
     <ClInclude Include="Services\DeepSeekClient.h" />
     <ClInclude Include="Services\DeploymentPathService.h" />
     <ClInclude Include="Services\HistoryIdentityService.h" />
+    <ClInclude Include="Services\NotificationIdentityService.h" />
+    <ClInclude Include="Services\NotificationService.h" />
     <ClInclude Include="Services\SettingsService.h" />
+    <ClInclude Include="Services\StateProfile.h" />
     <ClInclude Include="ViewModels\MainViewModel.h" />
   </ItemGroup>
   <ItemGroup>
@@ -141,10 +146,14 @@
     <ClCompile Include="AppTheme\ThemeManager.cpp" />
     <ClCompile Include="AppTheme\WindowsVersionDetector.cpp" />
     <ClCompile Include="Services\CredentialService.cpp" />
+    <ClCompile Include="Services\CleanupService.cpp" />
     <ClCompile Include="Services\DeepSeekClient.cpp" />
     <ClCompile Include="Services\DeploymentPathService.cpp" />
     <ClCompile Include="Services\HistoryIdentityService.cpp" />
+    <ClCompile Include="Services\NotificationIdentityService.cpp" />
+    <ClCompile Include="Services\NotificationService.cpp" />
     <ClCompile Include="Services\SettingsService.cpp" />
+    <ClCompile Include="Services\StateProfile.cpp" />
     <ClCompile Include="ViewModels\MainViewModel.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
   </ItemGroup>

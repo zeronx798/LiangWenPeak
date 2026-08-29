@@ -67,6 +67,14 @@
                                 <FontIcon Glyph="&#xE790;" />
                             </ToggleMenuFlyoutItem.Icon>
                         </ToggleMenuFlyoutItem>
+                        <ToggleMenuFlyoutItem
+                            x:Name="NotificationMenuItem"
+                            Click="OnNotificationToggleClick"
+                            Text="启用通知">
+                            <ToggleMenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE7ED;" />
+                            </ToggleMenuFlyoutItem.Icon>
+                        </ToggleMenuFlyoutItem>
                         <MenuFlyoutItem
                             x:Name="RefreshBalanceMenuItem"
                             Click="OnRefreshBalanceClick"
@@ -83,9 +91,12 @@
                                 <FontIcon Glyph="&#xE9D2;" />
                             </ToggleMenuFlyoutItem.Icon>
                         </ToggleMenuFlyoutItem>
-                        <MenuFlyoutItem Click="OnSetApiKeyClick" Text="API Key 功能...">
+                        <MenuFlyoutItem
+                            x:Name="SettingsMenuItem"
+                            Click="OnSettingsClick"
+                            Text="设置...">
                             <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="&#xE192;" />
+                                <SymbolIcon Symbol="Setting" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
                         <MenuFlyoutSeparator />

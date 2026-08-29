@@ -1,5 +1,7 @@
 #pragma once
 
+#include "StateProfile.h"
+
 #include <optional>
 #include <winrt/base.h>
 
@@ -8,14 +10,15 @@ namespace liangwenpeak::services
     class CredentialService final
     {
     public:
+        explicit CredentialService(StateProfile const& profile);
+
         [[nodiscard]] std::optional<winrt::hstring> TryGetApiKey() const noexcept;
         [[nodiscard]] bool HasApiKey() const noexcept;
         void SaveApiKey(winrt::hstring const& apiKey) const;
-        void ClearApiKey() const noexcept;
+        bool ClearApiKey() const noexcept;
 
     private:
-        static constexpr wchar_t ResourceName[] = L"LiangWenPeak.DeepSeekApi";
-        static constexpr wchar_t UserName[] = L"api-key";
+        winrt::hstring m_resourceName;
+        winrt::hstring m_userName;
     };
 }
-

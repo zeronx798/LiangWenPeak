@@ -15,6 +15,10 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 . (Join-Path $repositoryRoot 'scripts\common.ps1')
 
+if ($RequireObservedBalance) {
+    throw 'RequireObservedBalance is disabled: isolated UI tests never use or query a production API Key.'
+}
+
 if (-not ('LiangWenPeakBalanceUiTests.NativeMethods' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -40,6 +44,15 @@ namespace LiangWenPeakBalanceUiTests
         {
             public int X;
             public int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MonitorInfo
+        {
+            public int Size;
+            public Rect Monitor;
+            public Rect Work;
+            public uint Flags;
         }
 
         [DllImport("user32.dll")]
@@ -103,6 +116,43 @@ namespace LiangWenPeakBalanceUiTests
                 point.X = rect.Right;
                 point.Y = rect.Bottom;
                 return ClientToScreen(window, ref point);
+            }
+            finally
+            {
+                if (previous != IntPtr.Zero)
+                {
+                    SetThreadDpiAwarenessContext(previous);
+                }
+            }
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+        public static bool GetPhysicalMonitorWorkArea(IntPtr window, out Rect workArea)
+        {
+            workArea = new Rect();
+            IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+            try
+            {
+                IntPtr monitor = MonitorFromWindow(window, 2);
+                if (monitor == IntPtr.Zero)
+                {
+                    return false;
+                }
+
+                MonitorInfo info = new MonitorInfo();
+                info.Size = Marshal.SizeOf(typeof(MonitorInfo));
+                if (!GetMonitorInfo(monitor, ref info))
+                {
+                    return false;
+                }
+                workArea = info.Work;
+                return true;
             }
             finally
             {
@@ -234,11 +284,11 @@ Add-Type -AssemblyName UIAutomationClient
 $apiBalanceLabel = 'API ' + [char]0x4F59 + [char]0x989D
 $apiBurnLabel = 'API ' + [char]0x6D88 + [char]0x8017
 $etaLabel = ([char]0x9884).ToString() + [char]0x8BA1 + [char]0x89E6 + [char]0x5E95
-$settingsTitle = 'API Key ' + [char]0x529F + [char]0x80FD
+$settingsTitle = ([char]0x8BBE).ToString() + [char]0x7F6E
 $settingsMenuLabel = $settingsTitle + '...'
 $fluentThemeLabel = 'Fluent ' + [char]0x4E3B + [char]0x9898
-$settingsScrollRegionLabel = 'API ' + [char]0x8BBE + [char]0x7F6E +
-    [char]0x6EDA + [char]0x52A8 + [char]0x533A + [char]0x57DF
+$settingsScrollRegionLabel = $settingsTitle + [char]0x6EDA + [char]0x52A8 +
+    [char]0x533A + [char]0x57DF
 $undoLabel = ([char]0x64A4).ToString() + [char]0x9500
 $clearLabel = ([char]0x6E05).ToString() + [char]0x9664
 $resetConfirmationLabel = ([char]0x91CD).ToString() + [char]0x65B0 + [char]0x5F00 +
@@ -272,6 +322,16 @@ function Get-ClientBottom([IntPtr]$WindowHandle) {
         throw 'Unable to map the client-area bottom edge to screen coordinates.'
     }
     return $point
+}
+
+function Get-MonitorWorkArea([IntPtr]$WindowHandle) {
+    $rectangle = [LiangWenPeakBalanceUiTests.NativeMethods+Rect]::new()
+    if (-not [LiangWenPeakBalanceUiTests.NativeMethods]::GetPhysicalMonitorWorkArea(
+            $WindowHandle,
+            [ref]$rectangle)) {
+        throw 'Unable to read the settings window monitor work area.'
+    }
+    return $rectangle
 }
 
 function Test-SameRectangle($Left, $Right) {
@@ -331,6 +391,7 @@ function Find-InvokableElementByName(
                 }
             }
         }
+
         if ($null -ne $offscreenCandidate) {
             return $offscreenCandidate
         }
@@ -387,6 +448,33 @@ function Find-WindowByName([string]$Name, [int]$TimeoutMilliseconds = 5000) {
     return $null
 }
 
+function Find-ToggleElementByAutomationId(
+    [Windows.Automation.AutomationElement]$Root,
+    [string]$AutomationId,
+    [int]$TimeoutMilliseconds = 5000) {
+
+    $condition = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::AutomationIdProperty,
+        $AutomationId)
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    do {
+        $elements = $Root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+        for ($index = 0; $index -lt $elements.Count; ++$index) {
+            $candidate = $elements.Item($index)
+            $togglePattern = $null
+            if ($candidate.Current.IsEnabled -and
+                -not $candidate.Current.IsOffscreen -and
+                $candidate.TryGetCurrentPattern(
+                    [Windows.Automation.TogglePattern]::Pattern,
+                    [ref]$togglePattern)) {
+                return $candidate
+            }
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $null
+}
+
 function Assert-ElementInsideWindow(
     [Windows.Automation.AutomationElement]$Element,
     $WindowRectangle,
@@ -413,6 +501,7 @@ function Assert-ElementRightGutter(
     [Windows.Automation.AutomationElement]$Element,
     [Windows.Automation.AutomationElement]$ScrollRegion,
     [int]$Dpi,
+    [double]$CoordinateScale,
     [string]$Name) {
 
     $scrollPattern = $null
@@ -425,7 +514,8 @@ function Assert-ElementRightGutter(
 
     $elementBounds = $Element.Current.BoundingRectangle
     $scrollBounds = $ScrollRegion.Current.BoundingRectangle
-    $minimumGutter = [int][Math]::Floor(12.0 * $Dpi / 96.0)
+    $minimumGutter = [int][Math]::Floor(
+        (12.0 * $Dpi / 96.0) / $CoordinateScale)
     $actualGutter = $scrollBounds.Right - $elementBounds.Right
     if ($actualGutter -lt $minimumGutter) {
         throw "Settings control '$Name' has only $actualGutter physical pixels before the scrollbar region; expected at least $minimumGutter."
@@ -477,14 +567,20 @@ function Assert-UpdateTimeBottomPadding(
 }
 
 function Set-TestSettings([bool]$ApiEnabled, [bool]$ForecastEnabled) {
-    $key = 'HKCU:\Software\LiangWenPeak'
+    $key = $TestProfile.RegistryPath
     New-Item -Path $key -Force | Out-Null
     New-ItemProperty -Path $key -Name ApiFeatureEnabled -PropertyType DWord -Value ([int]$ApiEnabled) -Force | Out-Null
     New-ItemProperty -Path $key -Name BalanceForecastEnabled -PropertyType DWord -Value ([int]$ForecastEnabled) -Force | Out-Null
+    New-ItemProperty -Path $key -Name NotificationEnabled -PropertyType DWord -Value 0 -Force | Out-Null
+    New-ItemProperty -Path $key -Name NotificationAdvanceEnabled -PropertyType DWord -Value 1 -Force | Out-Null
+    New-ItemProperty -Path $key -Name NotificationAdvanceMinutes -PropertyType DWord -Value 10 -Force | Out-Null
 }
 
 function Start-TestApplication([string]$ApplicationPath, [string]$WorkingDirectory) {
-    $process = Start-Process -FilePath $ApplicationPath -WorkingDirectory $WorkingDirectory -PassThru
+    $process = Start-IsolatedTestProcess `
+        -Profile $TestProfile `
+        -FilePath $ApplicationPath `
+        -WorkingDirectory $WorkingDirectory
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
         Start-Sleep -Milliseconds 100
@@ -547,15 +643,7 @@ function Start-TestApplication([string]$ApplicationPath, [string]$WorkingDirecto
 }
 
 function Stop-TestApplication([Diagnostics.Process]$Process) {
-    if ($Process.HasExited) {
-        return
-    }
-    $Process.Refresh()
-    [void]$Process.CloseMainWindow()
-    if (-not $Process.WaitForExit(5000)) {
-        $Process.Kill()
-        $Process.WaitForExit()
-    }
+    Stop-IsolatedTestProcess -Profile $TestProfile -Process $Process
 }
 
 function Assert-MainWindowState(
@@ -630,31 +718,25 @@ $sourceApplicationPath = Join-Path $context.BuildOutput 'LiangWenPeak.App.exe'
 if (-not (Test-Path -LiteralPath $sourceApplicationPath -PathType Leaf)) {
     throw "Application build output was not found: $sourceApplicationPath"
 }
-$testRoot = Join-Path $repositoryRoot 'build\ui-tests\balance-extension'
-New-Item -ItemType Directory -Path $testRoot -Force | Out-Null
-$testRootBoundary = [IO.Path]::GetFullPath($testRoot).TrimEnd(
-    [IO.Path]::DirectorySeparatorChar,
-    [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-$runRoot = [IO.Path]::GetFullPath((Join-Path $testRoot ("run-{0:N}" -f [Guid]::NewGuid())))
-if (-not $runRoot.StartsWith($testRootBoundary, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refusing to create a UI test deployment outside the test root: $runRoot"
-}
-$applicationDirectory = Join-Path $runRoot 'app-ui-test'
+$TestProfile = New-IsolatedTestProfile `
+    -RepositoryRoot $repositoryRoot `
+    -TestArea 'balance-ui'
+$applicationDirectory = Join-Path $TestProfile.PortableRoot "app-$($context.Version)"
 New-Item -ItemType Directory -Path $applicationDirectory -Force | Out-Null
 Get-ChildItem -LiteralPath $context.BuildOutput -Force | Copy-Item `
     -Destination $applicationDirectory `
     -Recurse `
     -Force
 $applicationPath = Join-Path $applicationDirectory 'LiangWenPeak.App.exe'
-$registryBackup = Join-Path $testRoot 'settings-backup.reg'
-$settingsKey = 'HKCU\Software\LiangWenPeak'
-$settingsExisted = Test-Path 'HKCU:\Software\LiangWenPeak'
-if ($settingsExisted) {
-    & reg.exe export $settingsKey $registryBackup /y | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Unable to back up LiangWenPeak settings before UI validation.'
-    }
-}
+Copy-Item `
+    -LiteralPath (Join-Path $context.BuildOutput 'LiangWenPeak.exe') `
+    -Destination $TestProfile.ExpectedLauncherPath `
+    -Force
+[IO.File]::WriteAllText(
+    (Join-Path $TestProfile.PortableRoot 'current.txt'),
+    "$($context.Version)`r`n",
+    [Text.UTF8Encoding]::new($false))
+Write-Host "ISOLATED_TEST_RUN_ID=$($TestProfile.RunId)"
 
 try {
     $offRectangle = Assert-MainWindowState $applicationPath $applicationDirectory $false $false $false
@@ -677,7 +759,7 @@ try {
 
     Set-TestSettings -ApiEnabled $true -ForecastEnabled $false
     Remove-ItemProperty `
-        -Path 'HKCU:\Software\LiangWenPeak' `
+        -Path $TestProfile.RegistryPath `
         -Name FluentThemeEnabled `
         -ErrorAction SilentlyContinue
     $application = Start-TestApplication $applicationPath $applicationDirectory
@@ -706,6 +788,10 @@ try {
             }
         }
         $before = Get-WindowRectangle $mainHandle
+        # XamlControlsResources finishes wiring a Button-owned flyout just after
+        # the first stable frame; invoking it earlier is accepted but does not
+        # open the menu on a cold self-contained launch.
+        Start-Sleep -Seconds 1
         $more = Find-Element $mainRoot ([Windows.Automation.AutomationElement]::AutomationIdProperty) 'MoreButton'
         if ($null -eq $more) {
             throw 'More menu button was not found.'
@@ -720,6 +806,18 @@ try {
             $(if ($windowsBuild -ge 22000) { 5000 } else { 500 })
         if ($windowsBuild -ge 22000) {
             if ($null -eq $fluentTheme) {
+                $menuItems = [Windows.Automation.AutomationElement]::RootElement.FindAll(
+                    [Windows.Automation.TreeScope]::Descendants,
+                    [Windows.Automation.PropertyCondition]::new(
+                        [Windows.Automation.AutomationElement]::ControlTypeProperty,
+                        [Windows.Automation.ControlType]::MenuItem))
+                for ($menuIndex = 0; $menuIndex -lt $menuItems.Count; ++$menuIndex) {
+                    $menuCandidate = $menuItems.Item($menuIndex)
+                    if ($menuCandidate.Current.ProcessId -eq $application.Id -and
+                        -not $menuCandidate.Current.IsOffscreen) {
+                        Write-Host "VISIBLE_TEST_MENU_ITEM: Name='$($menuCandidate.Current.Name)' Id='$($menuCandidate.Current.AutomationId)'"
+                    }
+                }
                 throw 'Windows 11 did not expose the Fluent theme menu item.'
             }
             $toggle = $fluentTheme.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
@@ -729,11 +827,15 @@ try {
             $toggle.Toggle()
             Start-Sleep -Milliseconds 150
             if ((Get-ItemPropertyValue `
-                    -Path 'HKCU:\Software\LiangWenPeak' `
+                    -Path $TestProfile.RegistryPath `
                     -Name FluentThemeEnabled) -ne 0) {
                 throw 'Disabling Fluent theme was not persisted.'
             }
 
+            $more = Find-Element `
+                $mainRoot `
+                ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+                'MoreButton'
             Invoke-Element $more
             $fluentTheme = Find-ToggleElementByName `
                 ([Windows.Automation.AutomationElement]::RootElement) `
@@ -748,28 +850,86 @@ try {
             $toggle.Toggle()
             Start-Sleep -Milliseconds 150
             if ((Get-ItemPropertyValue `
-                    -Path 'HKCU:\Software\LiangWenPeak' `
+                    -Path $TestProfile.RegistryPath `
                     -Name FluentThemeEnabled) -ne 1) {
                 throw 'Re-enabling Fluent theme was not persisted.'
             }
+            $more = Find-Element `
+                $mainRoot `
+                ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+                'MoreButton'
             Invoke-Element $more
         } elseif ($null -ne $fluentTheme) {
             throw 'Windows 10 exposed the Fluent theme menu item instead of hiding it.'
         }
+
+        $notificationMenu = Find-ToggleElementByAutomationId `
+            ([Windows.Automation.AutomationElement]::RootElement) `
+            'NotificationMenuItem'
+        if ($null -eq $notificationMenu) {
+            throw 'Notification quick-toggle menu item was not found.'
+        }
+        $notificationMenuToggle = $notificationMenu.GetCurrentPattern(
+            [Windows.Automation.TogglePattern]::Pattern)
+        if ($notificationMenuToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off) {
+            throw 'Notification quick toggle did not reflect the persisted disabled default.'
+        }
+        $notificationMenuToggle.Toggle()
+        Start-Sleep -Milliseconds 150
+        if ((Get-ItemPropertyValue `
+                -Path $TestProfile.RegistryPath `
+                -Name NotificationEnabled) -ne 1) {
+            throw 'Notification quick toggle did not immediately persist enablement.'
+        }
+
+        Invoke-Element $more
+        $notificationMenu = Find-ToggleElementByAutomationId `
+            ([Windows.Automation.AutomationElement]::RootElement) `
+            'NotificationMenuItem'
+        $notificationMenuToggle = $notificationMenu.GetCurrentPattern(
+            [Windows.Automation.TogglePattern]::Pattern)
+        if ($notificationMenuToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::On) {
+            throw 'Notification quick toggle did not synchronize after persistence.'
+        }
+        $notificationMenuToggle.Toggle()
+        Start-Sleep -Milliseconds 150
+        if ((Get-ItemPropertyValue `
+                -Path $TestProfile.RegistryPath `
+                -Name NotificationEnabled) -ne 0) {
+            throw 'Notification quick toggle did not immediately persist disablement.'
+        }
+        Invoke-Element $more
+
         $settingsMenu = Find-InvokableElementByName `
             ([Windows.Automation.AutomationElement]::RootElement) `
             $settingsMenuLabel
         if ($null -eq $settingsMenu) {
-            throw 'API Key settings menu item was not found.'
+            throw 'Settings menu item was not found.'
         }
-        Invoke-Element $settingsMenu
 
+        Invoke-Element $settingsMenu
         $settingsWindow = Find-WindowByName $settingsTitle
         if ($null -eq $settingsWindow) {
-            throw 'Owned API Key settings window was not found.'
+            throw 'Owned settings window was not found.'
         }
         $settingsHandle = [IntPtr]$settingsWindow.Current.NativeWindowHandle
         $settingsRectangle = $settingsWindow.Current.BoundingRectangle
+        $settingsPhysicalRectangle = Get-WindowRectangle $settingsHandle
+        $settingsWorkArea = Get-MonitorWorkArea $settingsHandle
+        $settingsWindowDpi = [LiangWenPeakBalanceUiTests.NativeMethods]::GetDpiForWindow(
+            $settingsHandle)
+        $settingsHeight = $settingsPhysicalRectangle.Bottom - $settingsPhysicalRectangle.Top
+        $workAreaHeight = $settingsWorkArea.Bottom - $settingsWorkArea.Top
+        $maximumSettingsHeight = [int][Math]::Floor($workAreaHeight * 2.0 / 3.0)
+        $settingsAutomationHeight = $settingsRectangle.Bottom - $settingsRectangle.Top
+        if ($settingsAutomationHeight -le 0) {
+            throw 'Settings window has an invalid UI Automation bounding rectangle.'
+        }
+        $settingsCoordinateScale = $settingsHeight / $settingsAutomationHeight
+        if ($settingsWindowDpi -ne $ExpectedDpi -or
+            $settingsHeight -gt $maximumSettingsHeight) {
+            throw "Settings window violates its DPI/work-area height policy. DPI=$settingsWindowDpi; ExpectedDPI=$ExpectedDpi; Height=$settingsHeight; WorkAreaHeight=$workAreaHeight; Maximum=$maximumSettingsHeight."
+        }
         $owner = [LiangWenPeakBalanceUiTests.NativeMethods]::GetWindowLongPtr($settingsHandle, -8)
         $extendedStyle = [LiangWenPeakBalanceUiTests.NativeMethods]::GetWindowLongPtr($settingsHandle, -20).ToInt64()
         $mainExtendedStyle = [LiangWenPeakBalanceUiTests.NativeMethods]::GetWindowLongPtr($mainHandle, -20).ToInt64()
@@ -805,27 +965,96 @@ try {
         if ($null -eq $scrollRegion) {
             throw 'Settings scroll region was not found.'
         }
+        $settingsScrollPattern = $null
+        if (-not $scrollRegion.TryGetCurrentPattern(
+                [Windows.Automation.ScrollPattern]::Pattern,
+                [ref]$settingsScrollPattern) -or
+            -not $settingsScrollPattern.Current.VerticallyScrollable) {
+            throw 'Settings content does not expose the required native vertical scrolling.'
+        }
+
+        $apiSectionHeading = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'ApiBalanceSectionHeading'
+        $apiKeySubheading = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'ApiKeySubheading'
+        $apiFeatureControl = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'ApiFeatureToggle'
+        $apiKeyControl = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'ApiKeyBox'
+        if ($null -eq $apiSectionHeading -or
+            $null -eq $apiKeySubheading -or
+            $null -eq $apiFeatureControl -or
+            $null -eq $apiKeyControl) {
+            throw 'API settings hierarchy controls were not found.'
+        }
+        $apiSectionScrollItem = $null
+        if ($apiSectionHeading.TryGetCurrentPattern(
+                [Windows.Automation.ScrollItemPattern]::Pattern,
+                [ref]$apiSectionScrollItem)) {
+            $apiSectionScrollItem.ScrollIntoView()
+            Start-Sleep -Milliseconds 100
+        }
+        $apiSectionBounds = $apiSectionHeading.Current.BoundingRectangle
+        $apiKeySubheadingBounds = $apiKeySubheading.Current.BoundingRectangle
+        $apiFeatureBounds = $apiFeatureControl.Current.BoundingRectangle
+        $apiKeyBounds = $apiKeyControl.Current.BoundingRectangle
+        if ($apiSectionBounds.Bottom -gt $apiKeySubheadingBounds.Top -or
+            $apiKeySubheadingBounds.Bottom -gt $apiFeatureBounds.Top -or
+            $apiFeatureBounds.Bottom -gt $apiKeyBounds.Top) {
+            throw 'API settings visual order is not API 与余额 -> API Key -> enable toggle -> API Key input.'
+        }
 
         $scrollContentIds = @(
             'ApiFeatureToggle',
             'ApiKeyBox',
             'ClearApiKeyButton',
             'CurrencyBox',
-            'RefreshIntervalBox',
-            'ForecastEnabledBox',
             'WarningBalanceBox',
+            'RefreshIntervalBox',
             'RateWindowBox',
-            'AlgorithmBox')
+            'ForecastEnabledBox',
+            'AlgorithmBox',
+            'NotificationEnabledToggle',
+            'AdvanceReminderToggle',
+            'AdvanceMinutesBox',
+            'TestNotificationButton',
+            'CleanupButton')
         foreach ($automationId in $scrollContentIds) {
             $control = Find-Element $settingsWindow ([Windows.Automation.AutomationElement]::AutomationIdProperty) $automationId
             if ($null -eq $control) {
                 throw "Settings control '$automationId' was not found."
             }
+            if ($control.Current.IsOffscreen) {
+                $scrollItem = $null
+                if ($control.TryGetCurrentPattern(
+                        [Windows.Automation.ScrollItemPattern]::Pattern,
+                        [ref]$scrollItem)) {
+                    $scrollItem.ScrollIntoView()
+                    Start-Sleep -Milliseconds 100
+                }
+            }
             Assert-ElementInsideWindow $control $settingsRectangle $automationId
-            Assert-ElementRightGutter $control $scrollRegion $ExpectedDpi $automationId
+            Assert-ElementRightGutter `
+                $control `
+                $scrollRegion `
+                $ExpectedDpi `
+                $settingsCoordinateScale `
+                $automationId
         }
 
-        foreach ($toggleId in @('ApiFeatureToggle', 'ForecastEnabledBox')) {
+        foreach ($toggleId in @(
+            'ApiFeatureToggle',
+            'ForecastEnabledBox',
+            'NotificationEnabledToggle',
+            'AdvanceReminderToggle')) {
             $toggleControl = Find-Element `
                 $settingsWindow `
                 ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
@@ -841,6 +1070,7 @@ try {
 
         foreach ($automationId in @(
             'ResetStatisticsButton',
+            'CleanupButton',
             'SaveButton',
             'CancelButton')) {
             $control = Find-Element $settingsWindow ([Windows.Automation.AutomationElement]::AutomationIdProperty) $automationId
@@ -849,6 +1079,177 @@ try {
             }
             Assert-ElementInsideWindow $control $settingsRectangle $automationId
         }
+
+        $notificationToggleControl = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'NotificationEnabledToggle'
+        $advanceToggleControl = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'AdvanceReminderToggle'
+        $advanceMinutesControl = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'AdvanceMinutesBox'
+        $testNotification = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'TestNotificationButton'
+        $notificationDraftToggle = $notificationToggleControl.GetCurrentPattern(
+            [Windows.Automation.TogglePattern]::Pattern)
+        if ($notificationDraftToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off -or
+            $advanceToggleControl.Current.IsEnabled -or
+            $advanceMinutesControl.Current.IsEnabled -or
+            -not $testNotification.Current.IsEnabled) {
+            throw 'Default notification Draft control enablement is incorrect.'
+        }
+        $advanceRange = $advanceMinutesControl.GetCurrentPattern(
+            [Windows.Automation.RangeValuePattern]::Pattern)
+        if ($advanceMinutesControl.Current.ControlType -ne [Windows.Automation.ControlType]::Spinner -or
+            $advanceRange.Current.Minimum -ne 1 -or
+            $advanceRange.Current.Maximum -ne 30 -or
+            $advanceRange.Current.SmallChange -ne 1 -or
+            $advanceRange.Current.Value -ne 10) {
+            throw 'Notification NumberBox does not expose the required 1-30 integer defaults.'
+        }
+
+        Invoke-Element $testNotification
+        Start-Sleep -Milliseconds 150
+        $notificationStatus = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'SettingsStatusText'
+        if ($null -eq $notificationStatus -or [string]::IsNullOrWhiteSpace($notificationStatus.Current.Name)) {
+            throw 'Test notification did not execute as an immediate action while notifications were disabled.'
+        }
+
+        $notificationDraftToggle.Toggle()
+        Start-Sleep -Milliseconds 100
+        if ((Get-ItemPropertyValue `
+                -Path $TestProfile.RegistryPath `
+                -Name NotificationEnabled) -ne 0) {
+            throw 'Editing notificationEnabled in the settings Draft changed persisted state before Save.'
+        }
+        if (-not $advanceToggleControl.Current.IsEnabled -or
+            -not $advanceMinutesControl.Current.IsEnabled -or
+            -not $testNotification.Current.IsEnabled) {
+            throw 'Enabling the notification Draft did not enable advance controls or preserve the test action.'
+        }
+        $advanceDraftToggle = $advanceToggleControl.GetCurrentPattern(
+            [Windows.Automation.TogglePattern]::Pattern)
+        $advanceDraftToggle.Toggle()
+        Start-Sleep -Milliseconds 100
+        if ($advanceMinutesControl.Current.IsEnabled) {
+            throw 'Disabling advance reminders did not disable the NumberBox.'
+        }
+        $advanceDraftToggle.Toggle()
+        Start-Sleep -Milliseconds 100
+        if (-not $advanceMinutesControl.Current.IsEnabled) {
+            throw 'Re-enabling advance reminders did not restore the NumberBox.'
+        }
+
+        $advanceScrollItem = $null
+        if ($advanceMinutesControl.TryGetCurrentPattern(
+                [Windows.Automation.ScrollItemPattern]::Pattern,
+                [ref]$advanceScrollItem)) {
+            $advanceScrollItem.ScrollIntoView()
+            Start-Sleep -Milliseconds 100
+        }
+        $upSpinButton = Find-Element `
+            $advanceMinutesControl `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'UpSpinButton'
+        $downSpinButton = Find-Element `
+            $advanceMinutesControl `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'DownSpinButton'
+        if ($null -eq $upSpinButton -or
+            $null -eq $downSpinButton -or
+            $upSpinButton.Current.ControlType -ne [Windows.Automation.ControlType]::Button -or
+            $downSpinButton.Current.ControlType -ne [Windows.Automation.ControlType]::Button -or
+            $upSpinButton.Current.IsOffscreen -or
+            $downSpinButton.Current.IsOffscreen) {
+            throw 'NumberBox does not expose its native inline Up/Down spin buttons.'
+        }
+
+        $advanceRange.SetValue(10)
+        Invoke-Element $upSpinButton
+        Start-Sleep -Milliseconds 100
+        if ($advanceRange.Current.Value -ne 11) {
+            throw 'NumberBox native Up spin button did not increment by SmallChange=1.'
+        }
+        Invoke-Element $downSpinButton
+        Start-Sleep -Milliseconds 100
+        if ($advanceRange.Current.Value -ne 10) {
+            throw 'NumberBox native Down spin button did not decrement by SmallChange=1.'
+        }
+
+        $advanceRange.SetValue(29)
+        Invoke-Element $upSpinButton
+        Start-Sleep -Milliseconds 100
+        if ($advanceRange.Current.Value -ne 30 -or $upSpinButton.Current.IsEnabled) {
+            throw 'NumberBox native upper boundary is not enforced at 30.'
+        }
+        $advanceRange.SetValue(2)
+        Invoke-Element $downSpinButton
+        Start-Sleep -Milliseconds 100
+        if ($advanceRange.Current.Value -ne 1 -or $downSpinButton.Current.IsEnabled) {
+            throw 'NumberBox native lower boundary is not enforced at 1.'
+        }
+
+        $advanceInput = Find-Element `
+            $advanceMinutesControl `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'InputBox'
+        $advanceInputValue = $null
+        if ($null -eq $advanceInput -or
+            -not $advanceInput.TryGetCurrentPattern(
+                [Windows.Automation.ValuePattern]::Pattern,
+                [ref]$advanceInputValue)) {
+            throw 'NumberBox does not expose its native editable input field.'
+        }
+        $advanceInputValue.SetValue('17')
+        $notificationToggleControl.SetFocus()
+        Start-Sleep -Milliseconds 100
+        if ($advanceRange.Current.Value -ne 17) {
+            throw 'NumberBox did not accept integer keyboard-style input.'
+        }
+
+        $advanceInput.SetFocus()
+        if (-not [LiangWenPeakBalanceUiTests.NativeMethods]::PostMessage(
+                $settingsHandle,
+                0x0100,
+                [IntPtr]0x26,
+                [IntPtr]0x01480001) -or
+            -not [LiangWenPeakBalanceUiTests.NativeMethods]::PostMessage(
+                $settingsHandle,
+                0x0101,
+                [IntPtr]0x26,
+                [IntPtr]([long]0xC1480001))) {
+            throw 'Unable to deliver the isolated NumberBox Up key validation.'
+        }
+        Start-Sleep -Milliseconds 100
+        if ($advanceRange.Current.Value -ne 18) {
+            throw 'NumberBox did not handle the Up key.'
+        }
+        if (-not [LiangWenPeakBalanceUiTests.NativeMethods]::PostMessage(
+                $settingsHandle,
+                0x0100,
+                [IntPtr]0x28,
+                [IntPtr]0x01500001) -or
+            -not [LiangWenPeakBalanceUiTests.NativeMethods]::PostMessage(
+                $settingsHandle,
+                0x0101,
+                [IntPtr]0x28,
+                [IntPtr]([long]0xC1500001))) {
+            throw 'Unable to deliver the isolated NumberBox Down key validation.'
+        }
+        Start-Sleep -Milliseconds 100
+        if ($advanceRange.Current.Value -ne 17) {
+            throw 'NumberBox did not handle the Down key.'
+        }
+        $advanceRange.SetValue(10)
 
         $clear = Find-Element $settingsWindow ([Windows.Automation.AutomationElement]::AutomationIdProperty) 'ClearApiKeyButton'
         Invoke-Element $clear
@@ -923,19 +1324,90 @@ try {
             ($mainStyleAfter -band 0x8) -eq 0) {
             throw "Closing settings changed the main window or left the owner disabled. Before=$($before.Left),$($before.Top),$($before.Right),$($before.Bottom); After=$($after.Left),$($after.Top),$($after.Right),$($after.Bottom); Enabled=$ownerEnabled; SettingsExists=$settingsStillExists."
         }
+        if ((Get-ItemPropertyValue `
+                -Path $TestProfile.RegistryPath `
+                -Name NotificationEnabled) -ne 0) {
+            throw 'Cancel committed notificationEnabled instead of discarding the Draft.'
+        }
 
+        $more = Find-Element $mainRoot ([Windows.Automation.AutomationElement]::AutomationIdProperty) 'MoreButton'
         Invoke-Element $more
+        $notificationMenu = Find-ToggleElementByAutomationId `
+            ([Windows.Automation.AutomationElement]::RootElement) `
+            'NotificationMenuItem'
+        if ($null -eq $notificationMenu -or
+            $notificationMenu.GetCurrentPattern(
+                [Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
+                [Windows.Automation.ToggleState]::Off) {
+            throw 'Notification menu did not remain synchronized after settings Cancel.'
+        }
+        $notificationMenu = $null
+        $more = $null
+        $mainRoot = $null
+        [GC]::Collect()
+        [GC]::WaitForPendingFinalizers()
         $settingsMenu = Find-InvokableElementByName `
             ([Windows.Automation.AutomationElement]::RootElement) `
             $settingsMenuLabel
-        if ($null -eq $settingsMenu) {
-            throw 'API Key settings menu item was not found for the owner-close check.'
+        Invoke-Element $settingsMenu
+        $settingsWindow = Find-WindowByName $settingsTitle
+        if ($null -eq $settingsWindow) {
+            throw 'Settings window did not reopen for the Save check.'
         }
+        $mainRoot = [Windows.Automation.AutomationElement]::FromHandle($mainHandle)
+
+        $notificationToggleControl = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'NotificationEnabledToggle'
+        $notificationToggleControl.GetCurrentPattern(
+            [Windows.Automation.TogglePattern]::Pattern).Toggle()
+        $save = Find-Element `
+            $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'SaveButton'
+        Invoke-Element $save
+        Start-Sleep -Milliseconds 500
+        if ((Get-ItemPropertyValue `
+                -Path $TestProfile.RegistryPath `
+                -Name NotificationEnabled) -ne 1) {
+            throw 'Settings Save did not commit notificationEnabled.'
+        }
+
+        $more = Find-Element $mainRoot ([Windows.Automation.AutomationElement]::AutomationIdProperty) 'MoreButton'
+        Invoke-Element $more
+        $notificationMenu = Find-ToggleElementByAutomationId `
+            ([Windows.Automation.AutomationElement]::RootElement) `
+            'NotificationMenuItem'
+        $notificationMenuToggle = $notificationMenu.GetCurrentPattern(
+            [Windows.Automation.TogglePattern]::Pattern)
+        if ($notificationMenuToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::On) {
+            throw 'Notification menu did not synchronize after settings Save.'
+        }
+        $notificationMenuToggle.Toggle()
+        Start-Sleep -Milliseconds 150
+        if ((Get-ItemPropertyValue `
+                -Path $TestProfile.RegistryPath `
+                -Name NotificationEnabled) -ne 0) {
+            throw 'Notification quick toggle did not disable the setting after Save.'
+        }
+
+        Invoke-Element $more
+        $notificationMenuToggle = $null
+        $notificationMenu = $null
+        $more = $null
+        $mainRoot = $null
+        [GC]::Collect()
+        [GC]::WaitForPendingFinalizers()
+        $settingsMenu = Find-InvokableElementByName `
+            ([Windows.Automation.AutomationElement]::RootElement) `
+            $settingsMenuLabel
         Invoke-Element $settingsMenu
         $settingsWindow = Find-WindowByName $settingsTitle
         if ($null -eq $settingsWindow) {
             throw 'Settings window did not reopen for the owner-close check.'
         }
+        $mainRoot = [Windows.Automation.AutomationElement]::FromHandle($mainHandle)
         $settingsHandle = [IntPtr]$settingsWindow.Current.NativeWindowHandle
         if (-not [LiangWenPeakBalanceUiTests.NativeMethods]::PostMessage(
                 $mainHandle,
@@ -955,31 +1427,6 @@ try {
     Write-Host "PASS: balance extension UI at $([int]($ExpectedDpi / 96 * 100))% DPI"
     Write-Host 'Main window client heights: 173; 200/213; 246/259 DIP (update hidden/visible)'
 } finally {
-    Get-Process -Name LiangWenPeak.App -ErrorAction SilentlyContinue |
-        Where-Object {
-            try {
-                $processPath = [IO.Path]::GetFullPath($_.Path)
-                $processPath.StartsWith($testRootBoundary, [StringComparison]::OrdinalIgnoreCase)
-            } catch {
-                $false
-            }
-        } |
-        ForEach-Object {
-            try { $_.Kill(); $_.WaitForExit() } catch {}
-        }
-    & reg.exe delete $settingsKey /f 2>$null | Out-Null
-    if ($settingsExisted) {
-        & reg.exe import $registryBackup | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Unable to restore LiangWenPeak settings after UI validation.'
-        }
-    }
-    if (Test-Path -LiteralPath $runRoot) {
-        $resolvedRunRoot = [IO.Path]::GetFullPath($runRoot)
-        if (-not $resolvedRunRoot.StartsWith($testRootBoundary, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Refusing to remove a UI test deployment outside the test root: $resolvedRunRoot"
-        }
-        Remove-Item -LiteralPath $resolvedRunRoot -Recurse -Force
-    }
+    Remove-IsolatedTestProfile -Profile $TestProfile -RepositoryRoot $repositoryRoot
     $global:LASTEXITCODE = 0
 }

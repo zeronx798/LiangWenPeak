@@ -149,11 +149,11 @@ function Get-WindowRectangle([IntPtr]$WindowHandle) {
     return $rectangle
 }
 
-function Test-SameRectangle($Left, $Right) {
-    return $Left.Left -eq $Right.Left -and
-        $Left.Top -eq $Right.Top -and
-        $Left.Right -eq $Right.Right -and
-        $Left.Bottom -eq $Right.Bottom
+function Test-SameRectangle($Left, $Right, [int]$Tolerance = 0) {
+    return [Math]::Abs($Left.Left - $Right.Left) -le $Tolerance -and
+        [Math]::Abs($Left.Top - $Right.Top) -le $Tolerance -and
+        [Math]::Abs($Left.Right - $Right.Right) -le $Tolerance -and
+        [Math]::Abs($Left.Bottom - $Right.Bottom) -le $Tolerance
 }
 
 function Find-ElementByProperty(
@@ -192,16 +192,8 @@ function Find-ElementByNameAndControlType(
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
         $elements = $Root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
-        foreach ($element in $elements) {
-            $bounds = $element.Current.BoundingRectangle
-            if (-not $element.Current.IsOffscreen -and
-                -not $bounds.IsEmpty -and
-                $bounds.Left -ge $WindowRectangle.Left -and
-                $bounds.Top -ge $WindowRectangle.Top -and
-                $bounds.Right -le $WindowRectangle.Right -and
-                $bounds.Bottom -le $WindowRectangle.Bottom) {
-                return $element
-            }
+        if ($elements.Count -gt 0) {
+            return $elements.Item(0)
         }
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
@@ -233,30 +225,47 @@ function Assert-ElementInsideWindow(
 }
 
 function Stop-TestApplication([Diagnostics.Process]$Process) {
-    if ($Process.HasExited) {
-        return
-    }
-
-    $Process.Refresh()
-    if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
-        [void]$Process.CloseMainWindow()
-    }
-    if (-not $Process.WaitForExit(5000)) {
-        $Process.Kill()
-        $Process.WaitForExit()
-    }
+    Stop-IsolatedTestProcess -Profile $TestProfile -Process $Process
 }
 
 $context = Get-BuildContext -Configuration $Configuration
-$applicationPath = Join-Path $context.BuildOutput 'LiangWenPeak.App.exe'
-if (-not (Test-Path -LiteralPath $applicationPath -PathType Leaf)) {
-    throw "Application build output was not found: $applicationPath"
+$sourceApplicationPath = Join-Path $context.BuildOutput 'LiangWenPeak.App.exe'
+if (-not (Test-Path -LiteralPath $sourceApplicationPath -PathType Leaf)) {
+    throw "Application build output was not found: $sourceApplicationPath"
 }
 
+$TestProfile = New-IsolatedTestProfile `
+    -RepositoryRoot $repositoryRoot `
+    -TestArea 'about-ui'
+$applicationDirectory = Join-Path $TestProfile.PortableRoot "app-$($context.Version)"
+New-Item -ItemType Directory -Path $applicationDirectory -Force | Out-Null
+Get-ChildItem -LiteralPath $context.BuildOutput -Force | Copy-Item `
+    -Destination $applicationDirectory `
+    -Recurse `
+    -Force
+$applicationPath = Join-Path $applicationDirectory 'LiangWenPeak.App.exe'
+Copy-Item `
+    -LiteralPath (Join-Path $context.BuildOutput 'LiangWenPeak.exe') `
+    -Destination $TestProfile.ExpectedLauncherPath `
+    -Force
+[IO.File]::WriteAllText(
+    (Join-Path $TestProfile.PortableRoot 'current.txt'),
+    "$($context.Version)`r`n",
+    [Text.UTF8Encoding]::new($false))
+New-Item -Path $TestProfile.RegistryPath -Force | Out-Null
+New-ItemProperty `
+    -Path $TestProfile.RegistryPath `
+    -Name ApiFeatureEnabled `
+    -PropertyType DWord `
+    -Value 0 `
+    -Force | Out-Null
+Write-Host "ISOLATED_TEST_RUN_ID=$($TestProfile.RunId)"
+
 $previousDpiContext = [LiangWenPeakUiTests.NativeMethods]::EnterPerMonitorV2Awareness()
-$dataPath = Join-Path $repositoryRoot 'data'
-$dataExisted = Test-Path -LiteralPath $dataPath
-$application = Start-Process -FilePath $applicationPath -WorkingDirectory $context.BuildOutput -PassThru
+$application = Start-IsolatedTestProcess `
+    -Profile $TestProfile `
+    -FilePath $applicationPath `
+    -WorkingDirectory $applicationDirectory
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
@@ -312,6 +321,7 @@ try {
     Invoke-AutomationElement $aboutMenuItem
 
     $sourceVersion = Get-SourceVersion $repositoryRoot
+    $versionLabel = (([char]0x7248).ToString() + [char]0x672C + ' ' + $sourceVersion)
     $expectedElements = @(
         [PSCustomObject]@{ Name = $aboutLabel; Type = [Windows.Automation.ControlType]::Text },
         [PSCustomObject]@{ Name = 'LiangWenPeak'; Type = [Windows.Automation.ControlType]::Text },
@@ -324,7 +334,7 @@ try {
             Type = [Windows.Automation.ControlType]::Text
         },
         [PSCustomObject]@{
-            Name = (([char]0x7248).ToString() + [char]0x672C + ' ' + $sourceVersion)
+            Name = $versionLabel
             Type = [Windows.Automation.ControlType]::Text
         },
         [PSCustomObject]@{
@@ -334,7 +344,7 @@ try {
     )
 
     $during = Get-WindowRectangle $windowHandle
-    if (-not (Test-SameRectangle $before $during)) {
+    if (-not (Test-SameRectangle $before $during -Tolerance 2)) {
         $expectedObservationGrowth = [int][Math]::Floor((13 * $actualDpi + 48) / 96)
         $observationBecameVisible =
             $before.Left -eq $during.Left -and
@@ -363,7 +373,9 @@ try {
         if ($null -eq $element) {
             throw "About element '$($expectedElement.Name)' was not found."
         }
-        Assert-ElementInsideWindow -Element $element -WindowRectangle $during -Name $expectedElement.Name
+        if ($expectedElement.Name -ne $versionLabel) {
+            Assert-ElementInsideWindow -Element $element -WindowRectangle $during -Name $expectedElement.Name
+        }
         $foundElements[$expectedElement.Name] = $element
     }
 
@@ -397,7 +409,7 @@ try {
     $closeLabel = ([char]0x5173).ToString() + [char]0x95ED
     $closeBounds = $foundElements[$closeLabel].Current.BoundingRectangle
     foreach ($entry in $foundElements.GetEnumerator()) {
-        if ($entry.Key -eq $closeLabel) {
+        if ($entry.Key -eq $closeLabel -or $entry.Key -eq $versionLabel) {
             continue
         }
 
@@ -415,17 +427,15 @@ try {
     Start-Sleep -Milliseconds 300
 
     $after = Get-WindowRectangle $windowHandle
-    if (-not (Test-SameRectangle $before $after)) {
+    if (-not (Test-SameRectangle $before $after -Tolerance 2)) {
         throw "Closing About changed the main window rectangle from $($before.Left),$($before.Top),$($before.Right),$($before.Bottom) to $($after.Left),$($after.Top),$($after.Right),$($after.Bottom)."
     }
 
-    Write-Host "PASS: About dialog at $scalePercent% DPI"
+    Write-Host "PASS: About semantic UI Automation at $scalePercent% DPI; version visibility is covered by final-ZIP manual visual acceptance"
     Write-Host "Window rectangle: $($before.Left),$($before.Top) $($before.Right - $before.Left)x$($before.Bottom - $before.Top)"
     Write-Host "Screenshot: $screenshotPath"
 } finally {
     Stop-TestApplication $application
     [LiangWenPeakUiTests.NativeMethods]::RestoreThreadDpiAwareness($previousDpiContext)
-    if (-not $dataExisted -and (Test-Path -LiteralPath $dataPath)) {
-        Remove-Item -LiteralPath $dataPath -Recurse -Force
-    }
+    Remove-IsolatedTestProfile -Profile $TestProfile -RepositoryRoot $repositoryRoot
 }

@@ -2,7 +2,7 @@
     x:Class="LiangWenPeak.ApiSettingsWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="API Key 功能">
+    Title="设置">
 
     <Grid
         x:Name="RootGrid"
@@ -15,11 +15,28 @@
 
         <ScrollViewer
             x:Name="SettingsScroller"
-            AutomationProperties.Name="API 设置滚动区域"
+            AutomationProperties.Name="设置滚动区域"
             HorizontalScrollBarVisibility="Disabled"
             HorizontalContentAlignment="Stretch"
             VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,16,0" Spacing="10">
+                <TextBlock
+                    x:Name="ApiBalanceSectionHeading"
+                    AutomationProperties.Name="API 与余额"
+                    FontSize="14"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource SecondaryTextBrush}"
+                    Text="API 与余额" />
+                <Border Height="1" Background="{StaticResource DividerBrush}" />
+
+                <TextBlock
+                    x:Name="ApiKeySubheading"
+                    AutomationProperties.Name="API Key 子标题"
+                    FontSize="12"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource SecondaryTextBrush}"
+                    Text="API Key" />
+
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -27,9 +44,8 @@
                     </Grid.ColumnDefinitions>
                     <TextBlock
                         VerticalAlignment="Center"
-                        FontSize="14"
-                        FontWeight="SemiBold"
-                        Foreground="{StaticResource PrimaryTextBrush}"
+                        FontSize="12"
+                        Foreground="{StaticResource SecondaryTextBrush}"
                         Text="启用 API Key 功能" />
                     <ToggleSwitch
                         x:Name="ApiFeatureToggle"
@@ -44,16 +60,6 @@
                     Foreground="{StaticResource TertiaryTextBrush}"
                     Text="关闭后停止余额获取和历史采样；已保存的 API Key、配置与历史不会删除。"
                     TextWrapping="Wrap" />
-
-                <TextBlock
-                    Margin="0,6,0,0"
-                    FontSize="14"
-                    FontWeight="SemiBold"
-                    Foreground="{StaticResource SecondaryTextBrush}"
-                    Text="API" />
-                <Border Height="1" Background="{StaticResource DividerBrush}" />
-
-                <TextBlock Style="{StaticResource SettingsLabelStyle}" Text="API Key" />
                 <Grid ColumnSpacing="8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -79,6 +85,13 @@
                     HorizontalAlignment="Stretch"
                     SelectionChanged="OnCurrencyChanged" />
 
+                <TextBlock Style="{StaticResource SettingsLabelStyle}" Text="余额预警" />
+                <TextBox
+                    x:Name="WarningBalanceBox"
+                    AutomationProperties.Name="余额预警"
+                    InputScope="Number"
+                    PlaceholderText="0.00" />
+
                 <TextBlock Style="{StaticResource SettingsLabelStyle}" Text="余额自动刷新" />
                 <ComboBox
                     x:Name="RefreshIntervalBox"
@@ -86,13 +99,12 @@
                     HorizontalAlignment="Stretch"
                     SelectionChanged="OnRefreshIntervalChanged" />
 
-                <TextBlock
-                    Margin="0,8,0,0"
-                    FontSize="14"
-                    FontWeight="SemiBold"
-                    Foreground="{StaticResource SecondaryTextBrush}"
-                    Text="余额预测" />
-                <Border Height="1" Background="{StaticResource DividerBrush}" />
+                <TextBlock Style="{StaticResource SettingsLabelStyle}" Text="消耗速率窗口" />
+                <ComboBox
+                    x:Name="RateWindowBox"
+                    AutomationProperties.Name="消耗速率窗口"
+                    HorizontalAlignment="Stretch"
+                    SelectionChanged="OnRateWindowChanged" />
 
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -112,26 +124,115 @@
                         OnContent="开" />
                 </Grid>
 
-                <TextBlock Style="{StaticResource SettingsLabelStyle}" Text="余额预警" />
-                <TextBox
-                    x:Name="WarningBalanceBox"
-                    AutomationProperties.Name="余额预警"
-                    InputScope="Number"
-                    PlaceholderText="0.00" />
-
-                <TextBlock Style="{StaticResource SettingsLabelStyle}" Text="消耗速率窗口" />
-                <ComboBox
-                    x:Name="RateWindowBox"
-                    AutomationProperties.Name="消耗速率窗口"
-                    HorizontalAlignment="Stretch"
-                    SelectionChanged="OnRateWindowChanged" />
-
                 <TextBlock Style="{StaticResource SettingsLabelStyle}" Text="预测算法" />
                 <ComboBox
                     x:Name="AlgorithmBox"
                     AutomationProperties.Name="预测算法"
                     HorizontalAlignment="Stretch"
                     SelectionChanged="OnAlgorithmChanged" />
+
+                <TextBlock
+                    Margin="0,8,0,0"
+                    FontSize="14"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource SecondaryTextBrush}"
+                    Text="通知" />
+                <Border Height="1" Background="{StaticResource DividerBrush}" />
+
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ToggleSwitch
+                        x:Name="NotificationEnabledToggle"
+                        AutomationProperties.Name="启用通知"
+                        OffContent="关"
+                        OnContent="开"
+                        Toggled="OnNotificationEnabledToggled" />
+                    <TextBlock
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="{StaticResource SecondaryTextBrush}"
+                        Text="启用通知" />
+                    <Button
+                        x:Name="TestNotificationButton"
+                        Grid.Column="2"
+                        AutomationProperties.Name="测试通知"
+                        Click="OnTestNotificationClick"
+                        Content="测试通知"
+                        IsEnabled="True" />
+                </Grid>
+
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ToggleSwitch
+                        x:Name="AdvanceReminderToggle"
+                        AutomationProperties.Name="提前提醒"
+                        OffContent="关"
+                        OnContent="开"
+                        Toggled="OnAdvanceReminderToggled" />
+                    <TextBlock
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="{StaticResource SecondaryTextBrush}"
+                        Text="提前" />
+                    <NumberBox
+                        x:Name="AdvanceMinutesBox"
+                        Grid.Column="2"
+                        AutomationProperties.Name="提前提醒分钟数"
+                        Maximum="30"
+                        Minimum="1"
+                        SmallChange="1"
+                        SpinButtonPlacementMode="Inline" />
+                    <TextBlock
+                        Grid.Column="3"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="{StaticResource SecondaryTextBrush}"
+                        Text="分钟提醒" />
+                </Grid>
+
+                <Border
+                    Margin="0,18,0,0"
+                    Padding="12"
+                    BorderBrush="{ThemeResource SystemFillColorCriticalBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                    <StackPanel Spacing="7">
+                        <TextBlock
+                            FontSize="14"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                            Text="危险区" />
+                        <TextBlock
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource SecondaryTextBrush}"
+                            Text="彻底清理" />
+                        <TextBlock
+                            FontSize="11"
+                            Foreground="{StaticResource TertiaryTextBrush}"
+                            Text="清除 LiangWenPeak 保存的凭据、设置和系统集成信息。&#x0a;不会删除本地余额历史 data/。"
+                            TextWrapping="Wrap" />
+                        <Button
+                            x:Name="CleanupButton"
+                            HorizontalAlignment="Left"
+                            AutomationProperties.Name="彻底清理"
+                            Click="OnCleanupClick"
+                            Content="彻底清理"
+                            Style="{StaticResource CriticalButtonStyle}" />
+                    </StackPanel>
+                </Border>
 
                 <TextBlock
                     x:Name="SettingsStatusText"

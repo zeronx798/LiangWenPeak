@@ -49,7 +49,7 @@ function New-RequiredPortableFixture {
         "app-$Version\App.xbf",
         "app-$Version\ApiSettingsWindow.xbf",
         "app-$Version\MainWindow.xbf",
-        "app-$Version\LiangWenPeak.pri",
+        "app-$Version\LiangWenPeak.App.pri",
         "app-$Version\Microsoft.WindowsAppRuntime.dll",
         "app-$Version\Microsoft.ui.xaml.dll"
     )) {

@@ -3,6 +3,7 @@
 #include "Time/BeijingTime.h"
 #include "Time/TimeFormatter.h"
 #include "BalanceStatisticsTests.h"
+#include "NotificationTests.h"
 #include "AppTheme/WindowsVersionDetector.h"
 #include "MainWindowLayout.h"
 
@@ -397,10 +398,14 @@ int main()
     {
         tests.Expect(condition, name);
     });
+    VerifyNotifications([&tests](bool const condition, std::string_view const name)
+    {
+        tests.Expect(condition, name);
+    });
 
     if (tests.FailureCount() == 0)
     {
-        std::cout << "All pricing, formatting, scheduling, layout, platform, history, forecast, and ETA tests passed.\n";
+        std::cout << "All pricing, notification, settings, formatting, scheduling, layout, platform, history, forecast, and ETA tests passed.\n";
     }
     else
     {

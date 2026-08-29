@@ -10,6 +10,9 @@
     <Filter Include="Balance">
       <UniqueIdentifier>{7879EBE0-4F37-49E0-B413-DBEAF6DFAE63}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Notifications">
+      <UniqueIdentifier>{A3F74A36-882D-4A67-B886-7D40DF2D7315}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Balance\BalanceFormatter.h"><Filter>Balance</Filter></ClInclude>
@@ -20,6 +23,8 @@
     <ClInclude Include="Balance\DecimalAmount.h"><Filter>Balance</Filter></ClInclude>
     <ClInclude Include="Balance\DeploymentPaths.h"><Filter>Balance</Filter></ClInclude>
     <ClInclude Include="Balance\SeriesIdentity.h"><Filter>Balance</Filter></ClInclude>
+    <ClInclude Include="Notifications\NotificationScheduler.h"><Filter>Notifications</Filter></ClInclude>
+    <ClInclude Include="Notifications\NotificationSettings.h"><Filter>Notifications</Filter></ClInclude>
     <ClInclude Include="Pricing\PricingScheduleService.h">
       <Filter>Pricing</Filter>
     </ClInclude>
@@ -42,6 +47,8 @@
     <ClCompile Include="Balance\DecimalAmount.cpp"><Filter>Balance</Filter></ClCompile>
     <ClCompile Include="Balance\DeploymentPaths.cpp"><Filter>Balance</Filter></ClCompile>
     <ClCompile Include="Balance\SeriesIdentity.cpp"><Filter>Balance</Filter></ClCompile>
+    <ClCompile Include="Notifications\NotificationScheduler.cpp"><Filter>Notifications</Filter></ClCompile>
+    <ClCompile Include="Notifications\NotificationSettings.cpp"><Filter>Notifications</Filter></ClCompile>
     <ClCompile Include="Pricing\PricingScheduleService.cpp">
       <Filter>Pricing</Filter>
     </ClCompile>
