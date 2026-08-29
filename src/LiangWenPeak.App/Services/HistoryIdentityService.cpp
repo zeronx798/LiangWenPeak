@@ -7,12 +7,18 @@
 
 namespace liangwenpeak::services
 {
+    HistoryIdentityService::HistoryIdentityService(StateProfile const& profile)
+        : m_resourceName(profile.HistoryCredentialResource()),
+          m_userName(profile.HistoryCredentialUserName())
+    {
+    }
+
     std::vector<std::uint8_t> HistoryIdentityService::GetOrCreateSecret() const
     {
         const winrt::Windows::Security::Credentials::PasswordVault vault;
         try
         {
-            auto credential = vault.Retrieve(ResourceName, UserName);
+            auto credential = vault.Retrieve(m_resourceName, m_userName);
             credential.RetrievePassword();
             auto secret = balance::DecodeHex(winrt::to_string(credential.Password()));
             if (secret.size() == balance::HistoryIdentitySecretSize)
@@ -29,8 +35,8 @@ namespace liangwenpeak::services
         auto secret = balance::GenerateHistoryIdentitySecret();
         const auto encoded = winrt::to_hstring(balance::EncodeHex(secret));
         vault.Add(winrt::Windows::Security::Credentials::PasswordCredential{
-            ResourceName,
-            UserName,
+            m_resourceName,
+            m_userName,
             encoded });
         return secret;
     }
@@ -51,6 +57,25 @@ namespace liangwenpeak::services
             std::fill(secret.begin(), secret.end(), std::uint8_t{ 0 });
             std::fill(key.begin(), key.end(), '\0');
             throw;
+        }
+    }
+
+    bool HistoryIdentityService::ClearSecret() const noexcept
+    {
+        try
+        {
+            const winrt::Windows::Security::Credentials::PasswordVault vault;
+            auto credential = vault.Retrieve(m_resourceName, m_userName);
+            vault.Remove(credential);
+            return true;
+        }
+        catch (winrt::hresult_error const& error)
+        {
+            return error.code() == HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+        }
+        catch (...)
+        {
+            return false;
         }
     }
 }

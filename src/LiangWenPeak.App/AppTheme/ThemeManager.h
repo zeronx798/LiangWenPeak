@@ -7,9 +7,12 @@ namespace liangwenpeak::apptheme
     class ThemeManager final
     {
     public:
+        explicit ThemeManager(services::StateProfile const& profile) noexcept;
+
         [[nodiscard]] bool IsFluentThemeAvailable() const noexcept;
         [[nodiscard]] bool IsFluentThemeEnabled() const noexcept;
         [[nodiscard]] bool SetFluentThemeEnabled(bool enabled) noexcept;
+        void Reload() noexcept;
 
         void ApplyToWindow(
             winrt::Microsoft::UI::Xaml::FrameworkElement const& root,

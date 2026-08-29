@@ -11,16 +11,15 @@ namespace liangwenpeak::apptheme
 {
     namespace
     {
-        constexpr wchar_t SettingsPath[] = L"Software\\LiangWenPeak";
         constexpr wchar_t FluentThemeEnabledName[] = L"FluentThemeEnabled";
 
-        std::optional<bool> LoadPersistedState() noexcept
+        std::optional<bool> LoadPersistedState(std::wstring const& settingsPath) noexcept
         {
             DWORD value{};
             DWORD size = sizeof(value);
             if (::RegGetValueW(
                 HKEY_CURRENT_USER,
-                SettingsPath,
+                settingsPath.c_str(),
                 FluentThemeEnabledName,
                 RRF_RT_REG_DWORD,
                 nullptr,
@@ -32,12 +31,12 @@ namespace liangwenpeak::apptheme
             return value != 0;
         }
 
-        bool SavePersistedState(bool const enabled) noexcept
+        bool SavePersistedState(std::wstring const& settingsPath, bool const enabled) noexcept
         {
             HKEY key{};
             if (::RegCreateKeyExW(
                 HKEY_CURRENT_USER,
-                SettingsPath,
+                settingsPath.c_str(),
                 0,
                 nullptr,
                 REG_OPTION_NON_VOLATILE,
@@ -62,9 +61,10 @@ namespace liangwenpeak::apptheme
         }
     }
 
-    FluentThemeService::FluentThemeService() noexcept
-        : m_available(WindowsVersionDetector::IsWindows11OrGreater()),
-          m_enabled(m_available && LoadPersistedState().value_or(true))
+    FluentThemeService::FluentThemeService(services::StateProfile const& profile) noexcept
+        : m_settingsPath(profile.RegistrySubkey()),
+          m_available(WindowsVersionDetector::IsWindows11OrGreater()),
+          m_enabled(m_available && LoadPersistedState(m_settingsPath).value_or(true))
     {
     }
 
@@ -88,11 +88,17 @@ namespace liangwenpeak::apptheme
         {
             return true;
         }
-        if (!SavePersistedState(enabled))
+        if (!SavePersistedState(m_settingsPath, enabled))
         {
             return false;
         }
         m_enabled = enabled;
         return true;
+    }
+
+    void FluentThemeService::Reload() noexcept
+    {
+        m_available = WindowsVersionDetector::IsWindows11OrGreater();
+        m_enabled = m_available && LoadPersistedState(m_settingsPath).value_or(true);
     }
 }

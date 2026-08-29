@@ -25,6 +25,7 @@ LiangWenPeak 是一个非官方 Windows 桌面状态仪表，用北京时间展�
 `src/LiangWenPeak.Core/` 是不依赖具体 XAML 控件的核心层，包含：
 
 - 北京时间转换、价格时间表、下一 transition 与时间格式化
+- 通知设置约束、真实 transition 调度、补发窗口与持久化去重状态模型
 - 自动刷新绝对时钟对齐
 - 固定精度余额、设置约束和多币种模型
 - CSV 历史读取、追加、归档与损坏恢复
@@ -35,13 +36,14 @@ LiangWenPeak 是一个非官方 Windows 桌面状态仪表，用北京时间展�
 
 `src/LiangWenPeak.App/` 是 C++/WinRT WinUI 3 应用，主要职责包括：
 
-- 创建 MainWindow 和 owned API settings window
+- 创建 MainWindow 和 owned settings window
 - 通过 `MainViewModel` 协调定价、余额、历史和 UI state
 - 异步调用 DeepSeek balance endpoint
 - 使用 Credential Locker 保存 API Key 与历史身份密钥
 - 使用当前用户注册表保存非敏感普通设置
+- 通过 classic WinRT `Windows.UI.Notifications` 与 desktop AUMID 发送 Toast
 - 检测 Windows 版本并管理 Windows 11 Fluent Theme 状态
-- 按真实时钟安排下一次自动刷新，并驱动动态窗口布局
+- 按真实时钟安排下一次自动刷新与通知，在系统恢复后重新协调调度，并驱动动态窗口布局
 
 #### Fluent Theme 与 Windows 版本
 
@@ -83,6 +85,14 @@ Release ZIP 不创建或携带用户 `data/`。Packaging 只从允许的 build o
 
 在正式 portable layout 中，App 从自身 `app-<version>/` 目录向上解析 deployment root，再使用根目录下的 `data/`。开发构建则通过仓库中的 `Version.props` 定位 repository root；测试可以显式注入隔离 data root。
 
+Unpackaged WinUI 资源也必须随同版本化 payload 完整 staging。项目输出与可执行文件资源映射名一致的 `LiangWenPeak.App.pri`，并在 `App.xaml` 的应用级资源中合并官方 `XamlControlsResources`；两者共同保证 `NumberBox` 等原生 WinUI 控件在 build output、staged portable 目录及最终 ZIP 解压目录中都能解析默认样式和本地化字符串。Packaging 会把该 PRI 视为必需文件并拒绝旧的 `LiangWenPeak.pri` 名称，避免开发目录可用而 portable 启动时在控件套用模板阶段 fail-fast。
+
+Toast 不改变这一发布结构。实际发送进程是 Launcher 启动的 unpackaged `LiangWenPeak.App.exe`，但 shell identity 的快捷方式 Target 固定为 portable 根目录的 `LiangWenPeak.exe`，而不是版本化 payload。Production AUMID 固定为 `zeronx798.LiangWenPeak`，与版本号和 portable 路径无关；进程在创建 UI 前调用 `SetCurrentProcessExplicitAppUserModelID` 设置同一身份。
+
+`NotificationIdentityService` 使用官方 Shell COM API `IShellLinkW`、`IPersistFile`、`IPropertyStore` 与 `PKEY_AppUserModel_ID`，在 `%APPDATA%\Microsoft\Windows\Start Menu\Programs\LiangWenPeak.lnk` 创建 per-user identity。通知默认关闭，因此首次普通运行只设置进程 AUMID，不创建 shortcut；第一次启用正式通知或点击测试通知时才创建。已启用通知的应用启动时会检查 AUMID 和 Target；portable 文件夹整体移动后，只在现有 shortcut 的 AUMID 与 Launcher 文件名均属于本应用时修复 Target。同名但身份不匹配的 shortcut 不会被覆盖或删除。
+
+`NotificationService` 使用 `ToastNotificationManager::CreateToastNotifier(AUMID)`、`ToastText02` XML template 和 `ToastNotification::Show` 投递 title/body。此前基于 `Microsoft.Windows.AppNotifications.AppNotificationManager::Register()` 的原型在当前 self-contained unpackaged ZIP 中返回 `0x8007007E`；Windows App SDK 官方文档明确说明 self-contained 部署不支持依赖 Singleton package 的 API，因为 Singleton 无法被 self-contained deployment 自带或由 package graph 提供。因此这里不再围绕 `Register()` 修补，而改用 Windows 10/11 系统提供的 classic desktop WinRT API，消除 Singleton proxy 依赖，也不需要额外 MSIX、installer、COM activator、protocol activation、后台服务或第三方框架。Windows 拒绝通知时服务返回可读失败状态，但其它功能保持正常。实现依据见 [Windows App SDK self-contained deployment limitations](https://learn.microsoft.com/windows/apps/package-and-deploy/self-contained-deploy/deploy-self-contained-apps)、[desktop Toast quickstart](https://learn.microsoft.com/windows/win32/shell/quickstart-sending-desktop-toast)、[desktop AppUserModelID shortcut](https://learn.microsoft.com/windows/win32/shell/enable-desktop-toast-with-appusermodelid) 和 [SetCurrentProcessExplicitAppUserModelID](https://learn.microsoft.com/windows/win32/api/shobjidl_core/nf-shobjidl_core-setcurrentprocessexplicitappusermodelid)。
+
 ## 5. 峰谷价格模型
 
 所有定价计算固定使用北京时间（UTC+8），不依赖 Windows 当前系统时区。
@@ -98,6 +108,24 @@ Release ZIP 不创建或携带用户 `data/`。Packaging 只从允许的 build o
 `PricingScheduleService` 同时负责当前 period、下一次真实 transition 和剩余时间。它检查候选边界前后的状态，跳过不改变价格的边界，因此周五 `18:00` 进入 Valley 后可以直接找到周一 `09:00` 的下一次 Peak。下一时段 formatter 会在跨日或跨周末时补充必要的星期信息。
 
 倒计时使用总小时数格式化，小时字段不会在 24 小时后回绕，所以跨周末 duration 可以显示超过 24 小时。
+
+### 5.1 通知调度
+
+`NotificationScheduler` 位于 Core，`NotificationService` 位于 App。前者只处理时间、事件与文案，后者只处理 Windows Toast 注册和发送；`PricingScheduleService` 继续只负责峰谷规则，不包含任何通知 API。
+
+通知设置默认值为：`Enabled=false`、`AdvanceEnabled=true`、`AdvanceMinutes=10`。提前分钟数必须是 `1–30` 的有限整数；读取到非法持久化值时恢复为 10，设置保存时则拒绝 `0`、负数、超过 30、NaN 和非整数。
+
+调度唯一来源是 `PricingScheduleService::GetNextTransition` 返回的下一次真实 transition：
+
+- `transition - AdvanceMinutes` 产生一次 Advance event。
+- `transition` 产生一次 Arrived event。
+- Advance 只在目标时间实时发送，错过后永不补发。
+- Arrived 可从当前时间向前检查最近一次真实 transition，并只在闭区间 `[transition, transition + 15min]` 内补发。
+- 普通启动不按“当前处于某状态”构造事件；只有确实存在、未去重且仍在 15 分钟窗口内的最近 transition 才能补发 Arrived。
+
+MainWindow 使用 one-shot `DispatcherQueueTimer` 唤醒，并以每秒 UI 时钟作为时钟跳变和恢复兜底。`PowerManager::SystemSuspendStatusChanged` 收到 `AutoResume` 或 `ManualResume` 后回到 UI queue，重新读取当前系统时间、检查 Arrived 补发并重新计算下一次唤醒；逻辑不假设 Timer 在睡眠期间精确触发。
+
+事件身份是 `transition UTC timestamp + NotificationType`。注册表分别保存最后一次 Advance 和 Arrived transition 的 Unix 秒；同类型不晚于已保存时间戳的事件都视为已处理。发送前先持久化去重状态，从而在 Timer 重入、UI 刷新、设置保存、恢复、重新激活或进程重启之间保持 at-most-once。两种类型独立记录，因此同一个 transition 的提前通知不会压掉到达通知。该状态不进入 `balance-history.csv`。
 
 ## 6. DeepSeek API 集成
 
@@ -119,7 +147,7 @@ API Key 使用 Windows Credential Locker 保存，Credential resource 为 `Liang
 
 设置窗口不回显已保存 Key。已配置时 PasswordBox 保持空白并显示占位说明；空白保存代表保留原 Key。清除是 DraftState 中的 pending action，只有保存设置后才真正调用 Credential Locker 删除；取消或撤销不会影响已保存凭据。
 
-非敏感设置保存在当前用户注册表 `HKCU\Software\LiangWenPeak`，包括 API 功能状态、预测状态、显示币种、刷新周期、速率窗口、preferred algorithm、各币种预警和已知币种列表。
+非敏感设置保存在当前用户注册表 `HKCU\Software\LiangWenPeak`，包括通知总开关、提前提醒开关与分钟数，以及 API 功能状态、预测状态、显示币种、刷新周期、速率窗口、preferred algorithm、各币种预警和已知币种列表。通知去重时间戳也保存在该注册表路径，但不属于用户可编辑 Draft。
 
 ## 8. Balance Observation 与 Scheduled Sample
 
@@ -284,11 +312,19 @@ Forecast OFF 只折叠“API 消耗”和“预计触底”。只要 API 功能�
 
 ## 17. Settings DraftState
 
-打开 API settings window 时，持久化普通设置复制为独立 DraftState。窗口内 API 总开关、显示币种、刷新周期、预测开关、各币种预警、速率窗口和 preferred algorithm 都只修改 draft。
+原“API Key 功能”窗口复用并更名为“设置”。打开窗口时，持久化普通设置完整复制为独立 DraftState。窗口内通知总开关、提前提醒开关与分钟数、API 总开关、显示币种、刷新周期、预测开关、各币种预警、速率窗口和 preferred algorithm 都只修改 draft；通知 scheduler 始终只读取 persisted settings。
 
 Save 通过一个 commit path 提交完整普通设置和 API Key pending action；Cancel 关闭窗口并丢弃未保存 draft。API Key 有 `Keep`、`Clear`、`Replace` 三种 draft action：空白保持、待清除和输入新 Key 都不会在保存前修改 Credential Locker。
 
-“重新开始统计”不是普通设置。用户确认后立即归档当前 active history 并创建新文件，这个 Action 不属于 Save / Cancel；随后取消设置窗口不会撤销已经完成的 rollover。
+主菜单“启用通知”是同一 persisted setting 的快捷入口：点击后立即持久化并立即启动或停止调度。设置窗口打开期间发生的外部快捷开关提交不会改写已有 Draft，也不会偷偷刷新窗口控件；若用户随后保存，则完整 Draft 覆盖当前 persisted settings，即 Snapshot + Last Commit Wins，不做字段级 merge。
+
+通知总开关为 OFF 时，提前提醒 ToggleSwitch 和 NumberBox disabled，但保留 Draft 原值；总开关为 ON 且提前提醒为 OFF 时只禁用 NumberBox。测试通知 Button 始终 enabled。NumberBox 的 `Min=1`、`Max=30`、`SmallChange=1`，保存路径仍会做最终有限整数验证。
+
+“重新开始统计”不是普通设置。用户确认后立即归档当前 active history 并创建新文件，这个 Action 不属于 Save / Cancel；随后取消设置窗口不会撤销已经完成的 rollover。“测试通知”同样是 Immediate Action，不读取或提交 Draft，也不要求 persisted 或 draft 通知总开关开启。
+
+“危险区 / 彻底清理”也是 Immediate Action，必须先通过 WinUI `ContentDialog` 明确确认。确认后 MainWindow 先停止 notification timer，`CleanupService` 再对当前 `StateProfile` 依次执行通知 runtime 停止、按当前 AUMID 清除受支持的 notification history（best effort）、验证并删除当前应用 shortcut、精确删除 API Key 与 History Identity credential、删除当前应用 Registry subtree。各步骤独立继续执行并收集必要项失败，不做无法保证并发安全的 rollback，也不会把已删除 secret 写回。
+
+清理路径没有 `BalanceHistoryStore` 或 `data/` 删除能力。`data/balance-history.csv`、`data/history/` 与未来所有 portable 本地历史都保持原位。清理成功或部分失败后，设置窗口先销毁清理前的 `SettingsDraft` 与 PasswordBox replacement text，再由 `SettingsService::LoadBalanceSettings()` 和现有 `BalanceSettings{}` 中央 defaults 建立新 Draft。MainViewModel 增加 generation 以废弃进行中的余额请求结果，重新加载实际 persisted state，ThemeManager 重新按 OS/default 计算，主菜单同步刷新。随后 Save 只能提交新 Draft，因此不能复活清理前的通知值、API Key action 或 identity secret。
 
 普通设置经规范化后保存在 `HKCU\Software\LiangWenPeak`。非法刷新周期、速率窗口、币种、负预警或不可持久化的 effective algorithm 会回退到合法状态；“最近有效采样”只在运行时由窗口关系决定，不覆盖 preferred algorithm。
 
@@ -311,6 +347,7 @@ API settings window 是 MainWindow 的 Win32 owned top-level window，不使用 
 - API Key 保存在 Windows Credential Locker，不进入普通配置、历史或日志。
 - `HistoryIdentitySecret` 保存在 Windows Credential Locker，与 API Key 使用不同 credential user。
 - 非敏感普通设置保存在当前用户注册表。
+- 通知 Advance/Arrived 去重时间戳保存在当前用户注册表，不写入余额历史。
 - 余额历史以明文 CSV 保存在 portable `data/`，包含 Series ID、时间、币种和余额，不包含 API Key。
 - LiangWenPeak 没有自己的后台服务；API Key 只发往 DeepSeek balance endpoint。
 - Release ZIP 不包含用户 `data/`；build/package 不删除或覆盖真实 `data/`。
@@ -351,6 +388,8 @@ Native C++ tests 覆盖：
 - 滑动平均、窗口边界线性裁剪、EWMA half-life、Huber robust trend 和非负 clamp
 - 多币种独立速率/ETA、ETA 状态优先级与自然单位格式化
 - DraftState、Key clear/undo/replace、window constraint 和 preferred/effective algorithm
+- 通知默认值、`1–30` 整数约束、Snapshot/Cancel/Save/Last Commit Wins 事务
+- Advance/Arrived、Timer 重入去重、周末、Friday-to-Monday、missed Advance 与 15 分钟 Arrived catch-up
 - CSV append/load、truncated tail repair、中间损坏归档、rollover、rollback 和 deployment path
 - MainWindow 三状态动态高度、更新时间 row 与 bottom padding 模型
 - Windows 10/11 build 边界与 Fluent Theme 可用性分类
@@ -361,12 +400,39 @@ PowerShell tests 覆盖：
 - source version 冲突、缺失构建环境、测试失败阻断、禁止 package 内容和 ZIP layout
 - 本地 `data/` sentinel 在 clean/publish 后保持不变，且不泄漏到 ZIP
 - staged Launcher smoke test 和 portable payload 验证
+- 主菜单通知快捷开关的即时持久化
+- danger cleanup Cancel、精确 Registry/Credential/shortcut 清理、unrelated shortcut 保留、notification history（系统支持时）、完整 Draft defaults 重建及 Save non-resurrection
+- isolated `data/balance-history.csv`、`data/history/test.csv` 与 sentinel 的逐文件 SHA-256 保留验证
+- Release-equivalent staged Launcher 的 classic Toast title/body、portable 目录移动后 shortcut Target repair 与 test-only teardown
 - MainWindow 动态高度、更新时间边界、settings owned/topmost/activation、控件 gutter 和 owner close
 - Windows 11 Fluent Theme 菜单默认状态、开关切换与持久化；Windows 10 菜单隐藏路径
 - About dialog 与主窗口尺寸稳定性
 - 100%、125%、150%、200% DPI 下的 UI layout 验证
 
 `release.ps1` 自动运行 native tests、build pipeline tests 和 Launcher tests。UI automation/DPI tests 作为独立验证脚本运行，因为它们需要可用桌面 session 和相应 DPI monitor 环境。
+
+1.1.2 最终 ZIP 的 About 已在 100%、150%、200% DPI 下完成人工视觉验收，“版本 1.1.2”在三档缩放下均完整、清晰可见。此前 About UI Automation 报告的裁切属于自动化边界检测误报，不是实际 UI regression；自动化继续严格要求 UIA 树中存在精确的版本文本，但不再根据该 TextBlock 偶发返回的空 `BoundingRectangle` 推断视觉裁切。窗口打开/关闭稳定性只容许 2 个物理像素的 DPI 舍入误差，其它 About 元素的边界与 Close 按钮重叠检查保持不变。自动化结果需要结合截图与人工视觉结论解释，不应据此修改已经通过验收的 About 视觉样式。
+
+Toast 验证分为两层。第一层始终严格验证隔离测试 AUMID 的通知中心历史中存在精确 title/body，同时验证 shortcut Target repair 与 teardown；这层不因专注/勿扰模式降级。第二层才检查 Windows Shell 横幅标题/正文是否暴露给桌面 UI Automation：脚本先通过公开、只读的 [`SHQueryUserNotificationState`](https://learn.microsoft.com/windows/win32/api/shellapi/nf-shellapi-shqueryusernotificationstate) 判断当前会话是否适合展示通知 UI；状态不是 `QUNS_ACCEPTS_NOTIFICATIONS` 时直接跳过横幅元素查询。若该 API 报告可展示、但随机测试 AUMID 的横幅仍未暴露给 UI Automation，同样只跳过第二层并提示“当前桌面会话没有向 UI Automation 暴露 Toast 横幅标题/正文，进行 UI Automation 请先关闭专注/勿扰模式。”，不把它误判为 Toast backend 或通知历史失败。测试不会读取 Windows 私有通知 Registry 来猜测勿扰状态。2026-08-28 已人工确认 1.1.2 的 classic Toast 测试通知可以正常显示系统横幅；UI Automation 是否暴露 Shell 横幅元素不作为人工可见性结论的唯一依据。
+
+### 21.1 Test Profile 隔离
+
+任何会启动 App 或 Launcher 的 integration/UI/portable test 都必须先生成 canonical GUID `TestRunId`，并通过 `LIANGWENPEAK_TEST_RUN_ID` 与 `LIANGWENPEAK_TEST_PORTABLE_ROOT` 只注入该子进程。两者缺一、GUID 不规范、root 非绝对路径或路径不包含 GUID 时，`StateProfile::FromEnvironment()` fail closed，绝不回落到 production namespace。
+
+Production/Test 资源映射如下：
+
+| Resource | Production | Test run |
+| --- | --- | --- |
+| Registry | `HKCU\Software\LiangWenPeak` | `HKCU\Software\LiangWenPeak.Tests\<GUID>` |
+| API credential | `LiangWenPeak.DeepSeekApi / api-key` | `LiangWenPeak.Test.<GUID>.ApiKey / api-key.<GUID>` |
+| History credential | `LiangWenPeak.DeepSeekApi / history-identity-secret` | `LiangWenPeak.Test.<GUID>.HistoryIdentity / history-identity-secret.<GUID>` |
+| AUMID | `zeronx798.LiangWenPeak` | `zeronx798.LiangWenPeak.Test.<GUID>` |
+| Shortcut | `LiangWenPeak.lnk` | `LiangWenPeak Test <GUID>.lnk` |
+| Local data | portable root `data/` | GUID staged root `data/` |
+
+测试凭据只使用 `TEST_ONLY_DO_NOT_USE_<GUID>` 等明显无效值，API 功能在系统集成测试中关闭，不发送 DeepSeek 请求。测试只保存自己启动的明确 PID；关闭时验证 PID ownership，不按 image name kill、Stop-Process 或向已有 LiangWenPeak 实例发送关闭消息。shortcut teardown 在删除前同时验证文件名、test AUMID 与当前 staged Launcher 的绝对 Target；Credential Locker 只按本次 Resource/UserName 精确 Retrieve/Remove，不 enumerate。测试禁止 production backup → mutate → restore。
+
+`Test-TestIsolation.ps1` 在 release tests 前静态拒绝 production Registry、credential、AUMID、shortcut、registry backup/restore 与 image-name termination pattern。每个运行在 `finally` 中清除本次 GUID 的 Registry、两个 credential、notification history、已验证 shortcut 与 staged root；旁边的 unrelated shortcut 和其它 test/production namespace 不受影响。
 
 ## 22. 非目标与明确边界
 
@@ -380,6 +446,7 @@ PowerShell tests 覆盖：
 - Multiple API key management
 - Auto updater
 - MSIX 或 installer
+- 自建通知服务器、后台常驻服务或第三方通知框架
 - System tray
 - Mica、Acrylic、透明桌面组件或大型 theme/i18n overhaul
 

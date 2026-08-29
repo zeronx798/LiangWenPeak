@@ -532,7 +532,7 @@ function Assert-PackageBuildOutputs {
         (Join-Path $Context.BuildOutput 'App.xbf'),
         (Join-Path $Context.BuildOutput 'ApiSettingsWindow.xbf'),
         (Join-Path $Context.BuildOutput 'MainWindow.xbf'),
-        (Join-Path $Context.BuildOutput 'LiangWenPeak.pri')
+        (Join-Path $Context.BuildOutput 'LiangWenPeak.App.pri')
     )
     foreach ($requiredFile in $requiredFiles) {
         if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
@@ -583,7 +583,7 @@ function Assert-PortablePackage {
         (Join-Path $applicationDirectory 'App.xbf'),
         (Join-Path $applicationDirectory 'ApiSettingsWindow.xbf'),
         (Join-Path $applicationDirectory 'MainWindow.xbf'),
-        (Join-Path $applicationDirectory 'LiangWenPeak.pri'),
+        (Join-Path $applicationDirectory 'LiangWenPeak.App.pri'),
         (Join-Path $applicationDirectory 'Microsoft.WindowsAppRuntime.dll'),
         (Join-Path $applicationDirectory 'Microsoft.ui.xaml.dll')
     )
@@ -635,4 +635,285 @@ function Format-ByteSize([int64]$Bytes) {
         return '{0:N2} KB' -f ($Bytes / 1KB)
     }
     return "$Bytes bytes"
+}
+
+function New-IsolatedTestProfile {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9-]+$')][string]$TestArea
+    )
+
+    $runId = [Guid]::NewGuid().ToString('D').ToLowerInvariant()
+    $buildRoot = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'build'))
+    $runRoot = [IO.Path]::GetFullPath((Join-Path $buildRoot "isolated-tests\$TestArea\$runId"))
+    $portableRoot = [IO.Path]::GetFullPath((Join-Path $runRoot "portable-$runId"))
+    $buildBoundary = $buildRoot.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    if (-not $runRoot.StartsWith($buildBoundary, [StringComparison]::OrdinalIgnoreCase) -or
+        $portableRoot.IndexOf($runId, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw "Refusing to create an isolated profile outside the build root: $runRoot"
+    }
+
+    New-Item -ItemType Directory -Path $portableRoot -Force | Out-Null
+    $shortcutName = "LiangWenPeak Test $runId.lnk"
+    [PSCustomObject]@{
+        RunId = $runId
+        RunRoot = $runRoot
+        PortableRoot = $portableRoot
+        RegistrySubkey = "Software\LiangWenPeak.Tests\$runId"
+        RegistryPath = "HKCU:\Software\LiangWenPeak.Tests\$runId"
+        ApiCredentialResource = "LiangWenPeak.Test.$runId.ApiKey"
+        ApiCredentialUserName = "api-key.$runId"
+        HistoryCredentialResource = "LiangWenPeak.Test.$runId.HistoryIdentity"
+        HistoryCredentialUserName = "history-identity-secret.$runId"
+        AppUserModelId = "zeronx798.LiangWenPeak.Test.$runId"
+        ShortcutName = $shortcutName
+        ShortcutPath = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$shortcutName"
+        ExpectedLauncherPath = Join-Path $portableRoot 'LiangWenPeak.exe'
+        OwnedProcessIds = [Collections.Generic.HashSet[int]]::new()
+    }
+}
+
+function Start-IsolatedTestProcess {
+    param(
+        [Parameter(Mandatory)]$Profile,
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string]$WorkingDirectory,
+        [string]$Arguments = ''
+    )
+
+    if ($Profile.RunId -notmatch '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or
+        [IO.Path]::GetFullPath($Profile.PortableRoot).IndexOf(
+            $Profile.RunId,
+            [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw 'Refusing to launch an invalid LiangWenPeak test profile.'
+    }
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = [IO.Path]::GetFullPath($FilePath)
+    $startInfo.WorkingDirectory = [IO.Path]::GetFullPath($WorkingDirectory)
+    $startInfo.Arguments = $Arguments
+    $startInfo.UseShellExecute = $false
+    $startInfo.EnvironmentVariables['LIANGWENPEAK_TEST_RUN_ID'] = $Profile.RunId
+    $startInfo.EnvironmentVariables['LIANGWENPEAK_TEST_PORTABLE_ROOT'] =
+        [IO.Path]::GetFullPath($Profile.PortableRoot)
+    $process = [Diagnostics.Process]::Start($startInfo)
+    if ($null -eq $process) {
+        throw 'Unable to start the isolated LiangWenPeak test process.'
+    }
+    [void]$Profile.OwnedProcessIds.Add($process.Id)
+    return $process
+}
+
+function Stop-IsolatedTestProcess {
+    param(
+        [Parameter(Mandatory)]$Profile,
+        [Parameter(Mandatory)][Diagnostics.Process]$Process
+    )
+
+    if (-not $Profile.OwnedProcessIds.Contains($Process.Id)) {
+        throw "Refusing to stop PID $($Process.Id); it is not owned by this test run."
+    }
+    $Process.Refresh()
+    if ($Process.HasExited) {
+        [void]$Profile.OwnedProcessIds.Remove($Process.Id)
+        return
+    }
+    [void]$Process.CloseMainWindow()
+    if (-not $Process.WaitForExit(5000)) {
+        $Process.Kill()
+        $Process.WaitForExit()
+    }
+    [void]$Profile.OwnedProcessIds.Remove($Process.Id)
+}
+
+function Start-IsolatedPortableApplication {
+    param(
+        [Parameter(Mandatory)]$Profile,
+        [Parameter(Mandatory)][string]$LauncherPath,
+        [Parameter(Mandatory)][string]$ExpectedApplicationPath,
+        [Parameter(Mandatory)][string]$WorkingDirectory
+    )
+
+    $expectedPath = [IO.Path]::GetFullPath($ExpectedApplicationPath)
+    $launcher = Start-IsolatedTestProcess `
+        -Profile $Profile `
+        -FilePath $LauncherPath `
+        -WorkingDirectory $WorkingDirectory
+    $childProcessId = $null
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        $candidate = Get-CimInstance Win32_Process `
+            -Filter "ParentProcessId = $($launcher.Id)" `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_.ExecutablePath) -and
+                [IO.Path]::GetFullPath($_.ExecutablePath).Equals(
+                    $expectedPath,
+                    [StringComparison]::OrdinalIgnoreCase)
+            } |
+            Select-Object -First 1
+        if ($null -ne $candidate) {
+            $childProcessId = [int]$candidate.ProcessId
+            break
+        }
+        Start-Sleep -Milliseconds 25
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    if (-not $launcher.WaitForExit(10000)) {
+        Stop-IsolatedTestProcess -Profile $Profile -Process $launcher
+        throw 'The isolated portable Launcher did not exit.'
+    }
+    [void]$Profile.OwnedProcessIds.Remove($launcher.Id)
+    if ($launcher.ExitCode -ne 0) {
+        throw "The isolated portable Launcher exited with code $($launcher.ExitCode)."
+    }
+    if ($null -eq $childProcessId) {
+        throw 'The isolated portable Launcher did not create the expected App child process.'
+    }
+
+    $application = [Diagnostics.Process]::GetProcessById($childProcessId)
+    [void]$Profile.OwnedProcessIds.Add($application.Id)
+    return $application
+}
+
+function Remove-IsolatedCredential {
+    param(
+        [Parameter(Mandatory)][string]$Resource,
+        [Parameter(Mandatory)][string]$UserName
+    )
+
+    try {
+        $vault = [Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]::new()
+        $credential = $vault.Retrieve($Resource, $UserName)
+        $vault.Remove($credential)
+    } catch {
+        # Exact-item lookup reports a missing credential as an exception.
+    }
+}
+
+function Set-IsolatedCredential {
+    param(
+        [Parameter(Mandatory)][string]$Resource,
+        [Parameter(Mandatory)][string]$UserName,
+        [Parameter(Mandatory)][string]$Secret
+    )
+
+    Remove-IsolatedCredential $Resource $UserName
+    $vault = [Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]::new()
+    $credential = [Windows.Security.Credentials.PasswordCredential,Windows.Security.Credentials,ContentType=WindowsRuntime]::new(
+        $Resource,
+        $UserName,
+        $Secret)
+    $vault.Add($credential)
+}
+
+function Test-IsolatedCredentialExists {
+    param(
+        [Parameter(Mandatory)][string]$Resource,
+        [Parameter(Mandatory)][string]$UserName
+    )
+
+    try {
+        $vault = [Windows.Security.Credentials.PasswordVault,Windows.Security.Credentials,ContentType=WindowsRuntime]::new()
+        [void]$vault.Retrieve($Resource, $UserName)
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Get-ShortcutIdentity {
+    param([Parameter(Mandatory)][string]$ShortcutPath)
+
+    $wsh = New-Object -ComObject WScript.Shell
+    $shell = New-Object -ComObject Shell.Application
+    try {
+        $link = $wsh.CreateShortcut($ShortcutPath)
+        $folder = $shell.Namespace((Split-Path -Parent $ShortcutPath))
+        $item = if ($null -ne $folder) { $folder.ParseName((Split-Path -Leaf $ShortcutPath)) } else { $null }
+        [PSCustomObject]@{
+            TargetPath = if ([string]::IsNullOrWhiteSpace($link.TargetPath)) {
+                ''
+            } else {
+                [IO.Path]::GetFullPath($link.TargetPath)
+            }
+            AppUserModelId = if ($null -ne $item) {
+                [string]$item.ExtendedProperty('System.AppUserModel.ID')
+            } else {
+                ''
+            }
+        }
+    } finally {
+        if ($null -ne $shell) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+        if ($null -ne $wsh) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($wsh) }
+    }
+}
+
+function Get-IsolatedToastHistoryCount {
+    param([Parameter(Mandatory)][string]$AppUserModelId)
+
+    try {
+        $history = [Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]::History
+        return @($history.GetHistory($AppUserModelId)).Count
+    } catch {
+        return $null
+    }
+}
+
+function Remove-IsolatedTestProfile {
+    param(
+        [Parameter(Mandatory)]$Profile,
+        [Parameter(Mandatory)][string]$RepositoryRoot
+    )
+
+    if ($Profile.RunId -notmatch '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or
+        $Profile.RegistrySubkey -ne "Software\LiangWenPeak.Tests\$($Profile.RunId)" -or
+        $Profile.AppUserModelId -ne "zeronx798.LiangWenPeak.Test.$($Profile.RunId)") {
+        throw 'Refusing to tear down an invalid LiangWenPeak test profile.'
+    }
+
+    foreach ($ownedPid in @($Profile.OwnedProcessIds)) {
+        try {
+            $ownedProcess = [Diagnostics.Process]::GetProcessById($ownedPid)
+            Stop-IsolatedTestProcess -Profile $Profile -Process $ownedProcess
+        } catch [ArgumentException] {
+            # The explicitly owned process already exited.
+        }
+    }
+
+    try {
+        $history = [Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]::History
+        $history.Clear($Profile.AppUserModelId)
+    } catch {
+        # Classic desktop notification history cleanup is best effort.
+    }
+
+    if (Test-Path -LiteralPath $Profile.ShortcutPath -PathType Leaf) {
+        $identity = Get-ShortcutIdentity -ShortcutPath $Profile.ShortcutPath
+        if ($identity.AppUserModelId -ne $Profile.AppUserModelId -or
+            -not [IO.Path]::GetFullPath($identity.TargetPath).Equals(
+                [IO.Path]::GetFullPath($Profile.ExpectedLauncherPath),
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove a shortcut not owned by test run $($Profile.RunId)."
+        }
+        Remove-Item -LiteralPath $Profile.ShortcutPath -Force
+    }
+
+    Remove-IsolatedCredential $Profile.ApiCredentialResource $Profile.ApiCredentialUserName
+    Remove-IsolatedCredential $Profile.HistoryCredentialResource $Profile.HistoryCredentialUserName
+    if (Test-Path -LiteralPath $Profile.RegistryPath) {
+        Remove-Item -LiteralPath $Profile.RegistryPath -Recurse -Force
+    }
+
+    $buildRoot = Join-Path $RepositoryRoot 'build'
+    Remove-GeneratedDirectory -Path $Profile.RunRoot -AllowedParent $buildRoot
+}
+
+function Get-LiangWenPeakProcessSnapshot {
+    @(Get-Process -Name 'LiangWenPeak', 'LiangWenPeak.App' -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $path = $null
+            try { $path = $_.Path } catch {}
+            [PSCustomObject]@{ Id = $_.Id; ProcessName = $_.ProcessName; Path = $path }
+        })
 }

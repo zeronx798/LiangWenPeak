@@ -32,6 +32,7 @@ namespace liangwenpeak::viewmodels
         pricing::PricingPeriod pricingPeriod = pricing::PricingPeriod::Valley;
         bool apiFeatureEnabled = true;
         bool forecastEnabled = false;
+        bool notificationEnabled = false;
         bool hasApiKey = false;
         bool hasSuccessfulObservation = false;
         bool isRefreshing = false;
@@ -41,6 +42,7 @@ namespace liangwenpeak::viewmodels
     {
         bool succeeded = false;
         bool scheduleChanged = false;
+        bool notificationScheduleChanged = false;
         std::optional<balance::BalanceRefreshReason> immediateRefreshReason;
     };
 
@@ -59,7 +61,7 @@ namespace liangwenpeak::viewmodels
         [[nodiscard]] winrt::Windows::Foundation::IAsyncAction RefreshBalanceAsync(
             balance::BalanceRefreshReason reason,
             std::optional<std::chrono::sys_seconds> scheduledTimestamp = std::nullopt);
-        [[nodiscard]] balance::ApiSettingsDraft CreateSettingsDraft() const;
+        [[nodiscard]] balance::SettingsDraft CreateSettingsDraft() const;
         [[nodiscard]] SettingsCommitResult CommitSettings(
             balance::BalanceSettings settings,
             balance::ApiKeyDraftAction keyAction,
@@ -67,6 +69,10 @@ namespace liangwenpeak::viewmodels
             std::chrono::sys_seconds now = std::chrono::floor<std::chrono::seconds>(
                 std::chrono::system_clock::now()));
         [[nodiscard]] bool SetForecastEnabled(bool enabled);
+        [[nodiscard]] bool SetNotificationEnabled(bool enabled);
+        void ReloadPersistedStateAfterCleanup(
+            std::chrono::sys_seconds now = std::chrono::floor<std::chrono::seconds>(
+                std::chrono::system_clock::now()));
         [[nodiscard]] bool ResetStatistics(
             std::chrono::sys_seconds now = std::chrono::floor<std::chrono::seconds>(
                 std::chrono::system_clock::now()));

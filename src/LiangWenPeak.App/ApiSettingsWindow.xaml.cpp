@@ -24,7 +24,7 @@ namespace winrt::LiangWenPeak::implementation
     namespace
     {
         constexpr int SettingsWindowWidth = 420;
-        constexpr int SettingsWindowHeight = 680;
+        constexpr int SettingsWindowNaturalHeight = 640;
         constexpr int WorkAreaInset = 16;
 
         winrt::hstring FormatRefreshInterval(std::chrono::minutes const interval)
@@ -110,10 +110,12 @@ namespace winrt::LiangWenPeak::implementation
 
     void ApiSettingsWindow::InitializeOwned(
         HWND const owner,
-        liangwenpeak::balance::ApiSettingsDraft draft,
+        liangwenpeak::balance::SettingsDraft draft,
         bool const fluentThemeEnabled,
         SaveCallback saveCallback,
         ResetCallback resetCallback,
+        TestNotificationCallback testNotificationCallback,
+        CleanupCallback cleanupCallback,
         ClosedCallback closedCallback)
     {
         m_owner = owner;
@@ -121,6 +123,8 @@ namespace winrt::LiangWenPeak::implementation
         m_draft.emplace(std::move(draft));
         m_saveCallback = std::move(saveCallback);
         m_resetCallback = std::move(resetCallback);
+        m_testNotificationCallback = std::move(testNotificationCallback);
+        m_cleanupCallback = std::move(cleanupCallback);
         m_closedCallback = std::move(closedCallback);
         ConfigureWindow();
         ApplyTheme();
@@ -250,9 +254,36 @@ namespace winrt::LiangWenPeak::implementation
         m_draft->Settings().preferredAlgorithm = AlgorithmAt(AlgorithmBox().SelectedIndex());
     }
 
+    void ApiSettingsWindow::OnNotificationEnabledToggled(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_suppressEvents || !m_draft)
+        {
+            return;
+        }
+        m_draft->Settings().notifications.enabled = NotificationEnabledToggle().IsOn();
+        UpdateNotificationControlState();
+    }
+
+    void ApiSettingsWindow::OnAdvanceReminderToggled(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_suppressEvents || !m_draft)
+        {
+            return;
+        }
+        m_draft->Settings().notifications.advanceEnabled = AdvanceReminderToggle().IsOn();
+        UpdateNotificationControlState();
+    }
+
+    void ApiSettingsWindow::OnTestNotificationClick(IInspectable const&, RoutedEventArgs const&)
+    {
+        SettingsStatusText().Text(m_testNotificationCallback
+            ? m_testNotificationCallback()
+            : L"\u6d4b\u8bd5\u901a\u77e5\u53d1\u9001\u5931\u8d25");
+    }
+
     void ApiSettingsWindow::OnSaveClick(IInspectable const&, RoutedEventArgs const&)
     {
-        if (!m_draft || !CaptureCurrentWarning())
+        if (!m_draft || !CaptureCurrentWarning() || !CaptureNotificationSettings())
         {
             return;
         }
@@ -278,10 +309,15 @@ namespace winrt::LiangWenPeak::implementation
         ConfirmResetStatisticsAsync();
     }
 
+    void ApiSettingsWindow::OnCleanupClick(IInspectable const&, RoutedEventArgs const&)
+    {
+        ConfirmCleanupAsync();
+    }
+
     void ApiSettingsWindow::ConfigureWindow()
     {
         m_appWindow = AppWindow();
-        m_appWindow.Title(L"API Key \u529f\u80fd");
+        m_appWindow.Title(L"\u8bbe\u7f6e");
         const auto presenter = m_appWindow.Presenter().as<OverlappedPresenter>();
         presenter.IsResizable(false);
         presenter.IsMaximizable(false);
@@ -318,7 +354,7 @@ namespace winrt::LiangWenPeak::implementation
             : ::GetDpiForWindow(m_windowHandle);
         const auto effectiveDpi = dpi == 0 ? USER_DEFAULT_SCREEN_DPI : dpi;
         auto width = ::MulDiv(SettingsWindowWidth, static_cast<int>(effectiveDpi), 96);
-        auto height = ::MulDiv(SettingsWindowHeight, static_cast<int>(effectiveDpi), 96);
+        auto height = ::MulDiv(SettingsWindowNaturalHeight, static_cast<int>(effectiveDpi), 96);
 
         const auto monitor = ::MonitorFromWindow(
             m_owner != nullptr ? m_owner : m_windowHandle,
@@ -327,8 +363,10 @@ namespace winrt::LiangWenPeak::implementation
         winrt::check_bool(::GetMonitorInfoW(monitor, &monitorInfo));
         const auto workWidth = monitorInfo.rcWork.right - monitorInfo.rcWork.left;
         const auto workHeight = monitorInfo.rcWork.bottom - monitorInfo.rcWork.top;
+        const auto maximumHeight = static_cast<int>(
+            (static_cast<long long>(workHeight) * 2) / 3);
         width = (std::min)(width, static_cast<int>(workWidth - WorkAreaInset * 2));
-        height = (std::min)(height, static_cast<int>(workHeight - WorkAreaInset * 2));
+        height = (std::min)(height, maximumHeight);
 
         RECT ownerBounds = monitorInfo.rcWork;
         if (m_owner != nullptr && ::IsWindow(m_owner))
@@ -345,8 +383,11 @@ namespace winrt::LiangWenPeak::implementation
             centeredY,
             monitorInfo.rcWork.top + WorkAreaInset,
             monitorInfo.rcWork.bottom - WorkAreaInset - height);
-        m_appWindow.Resize({ width, height });
+        // Enter the owner's monitor before applying the physical-pixel size.
+        // Otherwise Windows rescales a window created on another-DPI monitor
+        // after Resize and can grow it beyond the target work-area cap.
         m_appWindow.Move({ x, y });
+        m_appWindow.Resize({ width, height });
         m_closedToken = Closed({ this, &ApiSettingsWindow::OnWindowClosed });
     }
 
@@ -370,6 +411,11 @@ namespace winrt::LiangWenPeak::implementation
         ThemeManager::ApplyControlPresentation(AlgorithmBox(), m_fluentThemeEnabled);
         ThemeManager::ApplyControlPresentation(ApiFeatureToggle(), m_fluentThemeEnabled);
         ThemeManager::ApplyControlPresentation(ForecastEnabledBox(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(NotificationEnabledToggle(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(AdvanceReminderToggle(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(AdvanceMinutesBox(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(TestNotificationButton(), m_fluentThemeEnabled);
+        ThemeManager::ApplyControlPresentation(CleanupButton(), m_fluentThemeEnabled);
     }
 
     void ApiSettingsWindow::BringToFront()
@@ -401,6 +447,10 @@ namespace winrt::LiangWenPeak::implementation
         m_suppressEvents = true;
         ApiFeatureToggle().IsOn(m_draft->Settings().apiFeatureEnabled);
         ForecastEnabledBox().IsOn(m_draft->Settings().forecastEnabled);
+        NotificationEnabledToggle().IsOn(m_draft->Settings().notifications.enabled);
+        AdvanceReminderToggle().IsOn(m_draft->Settings().notifications.advanceEnabled);
+        AdvanceMinutesBox().Value(
+            static_cast<double>(m_draft->Settings().notifications.advanceMinutes.count()));
         ApiKeyBox().PlaceholderText(m_draft->PersistedHasApiKey()
             ? L"\u5df2\u914d\u7f6e\uff0c\u7559\u7a7a\u5219\u4fdd\u6301\u4e0d\u53d8"
             : L"sk-...");
@@ -431,6 +481,7 @@ namespace winrt::LiangWenPeak::implementation
         LoadWarningForCurrency();
         UpdateAlgorithmControl();
         UpdateApiKeyClearPresentation();
+        UpdateNotificationControlState();
     }
 
     void ApiSettingsWindow::PopulateRateWindows()
@@ -499,6 +550,19 @@ namespace winrt::LiangWenPeak::implementation
                 : L"sk-..."));
     }
 
+    void ApiSettingsWindow::UpdateNotificationControlState()
+    {
+        if (!m_draft)
+        {
+            return;
+        }
+        const bool enabled = m_draft->Settings().notifications.enabled;
+        AdvanceReminderToggle().IsEnabled(enabled);
+        AdvanceMinutesBox().IsEnabled(
+            enabled && m_draft->Settings().notifications.advanceEnabled);
+        TestNotificationButton().IsEnabled(true);
+    }
+
     void ApiSettingsWindow::LoadWarningForCurrency()
     {
         if (m_draft && !m_editingCurrency.empty())
@@ -522,6 +586,29 @@ namespace winrt::LiangWenPeak::implementation
             return false;
         }
         liangwenpeak::balance::SetWarningBalance(m_draft->Settings(), m_editingCurrency, *amount);
+        SettingsStatusText().Text({});
+        return true;
+    }
+
+    bool ApiSettingsWindow::CaptureNotificationSettings()
+    {
+        if (!m_draft)
+        {
+            return false;
+        }
+
+        std::chrono::minutes advanceMinutes;
+        if (!liangwenpeak::notifications::TryParseAdvanceMinutes(
+            AdvanceMinutesBox().Value(),
+            advanceMinutes))
+        {
+            SettingsStatusText().Text(L"\u63d0\u524d\u63d0\u9192\u65f6\u95f4\u5fc5\u987b\u662f 1 \u5230 30 \u4e4b\u95f4\u7684\u6574\u6570\u5206\u949f");
+            return false;
+        }
+
+        m_draft->Settings().notifications.enabled = NotificationEnabledToggle().IsOn();
+        m_draft->Settings().notifications.advanceEnabled = AdvanceReminderToggle().IsOn();
+        m_draft->Settings().notifications.advanceMinutes = advanceMinutes;
         SettingsStatusText().Text({});
         return true;
     }
@@ -591,6 +678,72 @@ namespace winrt::LiangWenPeak::implementation
             if (!m_closed)
             {
                 SettingsStatusText().Text(L"\u5386\u53f2\u5f52\u6863\u5931\u8d25");
+            }
+        }
+    }
+
+    winrt::fire_and_forget ApiSettingsWindow::ConfirmCleanupAsync()
+    {
+        auto lifetime = get_strong();
+        try
+        {
+            TextBlock message;
+            message.Text(
+                L"这将清除：\n"
+                L"• 已保存的 API Key 和身份密钥\n"
+                L"• 应用设置\n"
+                L"• LiangWenPeak 创建的通知系统集成信息\n\n"
+                L"本地余额历史 data/ 不会被删除。\n\n"
+                L"此操作无法撤销。");
+            message.TextWrapping(TextWrapping::Wrap);
+
+            ContentDialog dialog;
+            dialog.XamlRoot(RootGrid().XamlRoot());
+            dialog.Title(winrt::box_value(L"彻底清理 LiangWenPeak？"));
+            dialog.Content(message);
+            dialog.PrimaryButtonText(L"彻底清理");
+            dialog.CloseButtonText(L"取消");
+            dialog.DefaultButton(ContentDialogButton::Close);
+            dialog.PrimaryButtonStyle(
+                Application::Current().Resources()
+                    .Lookup(winrt::box_value(L"CriticalButtonStyle"))
+                    .as<Style>());
+
+            if (co_await dialog.ShowAsync() != ContentDialogResult::Primary)
+            {
+                co_return;
+            }
+
+            // The confirmed cleanup owns a new transaction. Destroy the old
+            // draft and its replacement key text before any cleanup step runs.
+            m_draft.reset();
+            m_suppressEvents = true;
+            ApiKeyBox().Password({});
+            m_suppressEvents = false;
+
+            auto reset = m_cleanupCallback
+                ? m_cleanupCallback()
+                : std::optional<CleanupResetState>{};
+            if (!reset)
+            {
+                SettingsStatusText().Text(L"彻底清理失败；旧设置草稿已丢弃");
+                Close();
+                co_return;
+            }
+
+            m_draft.emplace(std::move(reset->draft));
+            m_fluentThemeEnabled = reset->fluentThemeEnabled;
+            PopulateControls();
+            ApplyTheme();
+            SettingsStatusText().Text(reset->statusMessage);
+        }
+        catch (...)
+        {
+            m_draft.reset();
+            if (!m_closed)
+            {
+                SettingsStatusText().Text(L"彻底清理失败；旧设置草稿已丢弃");
+                Close();
             }
         }
     }

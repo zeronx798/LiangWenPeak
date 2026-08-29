@@ -20,6 +20,7 @@
 #include "Time/BeijingTime.h"
 
 #include <string>
+#include <utility>
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "shcore.lib")
@@ -116,30 +117,53 @@ namespace winrt::LiangWenPeak::implementation
     }
 
     MainWindow::MainWindow()
+        : MainWindow(liangwenpeak::services::StateProfile::FromEnvironment())
+    {
+    }
+
+    MainWindow::MainWindow(liangwenpeak::services::StateProfile profile)
+        : m_stateProfile(std::move(profile)),
+          m_deploymentPaths(m_stateProfile),
+          m_credentialService(
+              std::make_shared<liangwenpeak::services::CredentialService>(m_stateProfile)),
+          m_settingsService(
+              std::make_shared<liangwenpeak::services::SettingsService>(m_stateProfile)),
+          m_historyIdentityService(
+              std::make_shared<liangwenpeak::services::HistoryIdentityService>(m_stateProfile)),
+          m_notificationService(m_stateProfile, m_deploymentPaths.LauncherPath()),
+          m_cleanupService(
+              m_settingsService,
+              m_credentialService,
+              m_historyIdentityService,
+              m_notificationService),
+          m_themeManager(m_stateProfile)
     {
         InitializeComponent();
 
-        auto credentialService = std::make_shared<liangwenpeak::services::CredentialService>();
-        auto settingsService = std::make_shared<liangwenpeak::services::SettingsService>();
-        auto identityService = std::make_shared<liangwenpeak::services::HistoryIdentityService>();
-        const liangwenpeak::services::DeploymentPathService deploymentPaths;
         auto historyStore = std::make_shared<liangwenpeak::balance::BalanceHistoryStore>(
-            deploymentPaths.DataRoot());
+            m_deploymentPaths.DataRoot());
         m_viewModel = std::make_shared<liangwenpeak::viewmodels::MainViewModel>(
-            std::move(credentialService),
+            m_credentialService,
             std::make_shared<liangwenpeak::services::DeepSeekClient>(),
-            std::move(settingsService),
-            std::move(identityService),
+            m_settingsService,
+            m_historyIdentityService,
             std::move(historyStore));
 
         ConfigureWindow();
         ApplyTheme();
+        m_notificationDeliveryState = m_settingsService->LoadNotificationDeliveryState();
+        static_cast<void>(m_notificationService.Initialize());
         m_viewModel->Initialize();
+        if (m_viewModel->Settings().notifications.enabled)
+        {
+            static_cast<void>(m_notificationService.EnsureIdentity());
+        }
         ApplyWindowPresentation();
         ApplyState();
         RootGrid().UpdateLayout();
         ArmFirstFrameReveal();
         ConfigureTimers();
+        ConfigurePowerNotifications();
     }
 
     void MainWindow::OnRootLoaded(IInspectable const&, RoutedEventArgs const&)
@@ -151,7 +175,9 @@ namespace winrt::LiangWenPeak::implementation
 
         m_loaded = true;
         m_clockTimer.Start();
-        ScheduleNextBalanceRefresh(std::chrono::system_clock::now());
+        const auto now = std::chrono::system_clock::now();
+        ScheduleNextBalanceRefresh(now);
+        ReconcileNotificationSchedule(now);
         RefreshBalanceAsync(liangwenpeak::balance::BalanceRefreshReason::StartupObservation);
     }
 
@@ -161,6 +187,7 @@ namespace winrt::LiangWenPeak::implementation
         m_viewModel->UpdateClock(now);
         ApplyState();
         ReconcileBalanceRefreshSchedule(now);
+        ReconcileNotificationSchedule(now);
     }
 
     void MainWindow::OnBalanceTimerTick(
@@ -193,6 +220,48 @@ namespace winrt::LiangWenPeak::implementation
                 liangwenpeak::balance::BalanceRefreshReason::ScheduledSample,
                 target);
         }
+    }
+
+    void MainWindow::OnNotificationTimerTick(
+        Microsoft::UI::Dispatching::DispatcherQueueTimer const&,
+        IInspectable const&)
+    {
+        m_nextNotificationWake.reset();
+        ReconcileNotificationSchedule(std::chrono::system_clock::now());
+    }
+
+    void MainWindow::OnSystemSuspendStatusChanged(IInspectable const&, IInspectable const&)
+    {
+        using winrt::Microsoft::Windows::System::Power::PowerManager;
+        using winrt::Microsoft::Windows::System::Power::SystemSuspendStatus;
+
+        SystemSuspendStatus status{};
+        try
+        {
+            status = PowerManager::SystemSuspendStatus();
+        }
+        catch (...)
+        {
+            return;
+        }
+        if (status != SystemSuspendStatus::AutoResume
+            && status != SystemSuspendStatus::ManualResume)
+        {
+            return;
+        }
+
+        auto weak = get_weak();
+        static_cast<void>(DispatcherQueue().TryEnqueue([weak]() noexcept
+        {
+            if (auto strong = weak.get(); strong && !strong->m_closing)
+            {
+                const auto now = std::chrono::system_clock::now();
+                strong->m_viewModel->UpdateClock(now);
+                strong->ApplyState();
+                strong->ReconcileBalanceRefreshSchedule(now);
+                strong->ReconcileNotificationSchedule(now);
+            }
+        }));
     }
 
     void MainWindow::OnAlwaysOnTopClick(IInspectable const& sender, RoutedEventArgs const&)
@@ -230,9 +299,25 @@ namespace winrt::LiangWenPeak::implementation
         ApplyState();
     }
 
-    void MainWindow::OnSetApiKeyClick(IInspectable const&, RoutedEventArgs const&)
+    void MainWindow::OnNotificationToggleClick(IInspectable const& sender, RoutedEventArgs const&)
     {
-        ShowApiSettingsWindow();
+        const auto item = sender.as<ToggleMenuFlyoutItem>();
+        if (!m_viewModel->SetNotificationEnabled(item.IsChecked()))
+        {
+            item.IsChecked(m_viewModel->State().notificationEnabled);
+            return;
+        }
+        if (item.IsChecked())
+        {
+            static_cast<void>(m_notificationService.EnsureIdentity());
+        }
+        ApplyState();
+        ScheduleNextNotification(std::chrono::system_clock::now());
+    }
+
+    void MainWindow::OnSettingsClick(IInspectable const&, RoutedEventArgs const&)
+    {
+        ShowSettingsWindow();
     }
 
     void MainWindow::OnAboutClick(IInspectable const&, RoutedEventArgs const&)
@@ -346,6 +431,25 @@ namespace winrt::LiangWenPeak::implementation
         m_balanceTimer = DispatcherQueue().CreateTimer();
         m_balanceTimer.IsRepeating(false);
         m_balanceTickToken = m_balanceTimer.Tick({ this, &MainWindow::OnBalanceTimerTick });
+
+        m_notificationTimer = DispatcherQueue().CreateTimer();
+        m_notificationTimer.IsRepeating(false);
+        m_notificationTickToken = m_notificationTimer.Tick({ this, &MainWindow::OnNotificationTimerTick });
+    }
+
+    void MainWindow::ConfigurePowerNotifications() noexcept
+    {
+        try
+        {
+            m_suspendStatusToken =
+                winrt::Microsoft::Windows::System::Power::PowerManager::SystemSuspendStatusChanged(
+                    { this, &MainWindow::OnSystemSuspendStatusChanged });
+            m_suspendStatusHandlerAttached = true;
+        }
+        catch (...)
+        {
+            // The clock timer remains a resume reconciliation fallback.
+        }
     }
 
     void MainWindow::ScheduleNextBalanceRefresh(std::chrono::system_clock::time_point const now)
@@ -417,6 +521,108 @@ namespace winrt::LiangWenPeak::implementation
         }
     }
 
+    void MainWindow::ScheduleNextNotification(std::chrono::system_clock::time_point const now)
+    {
+        m_notificationTimer.Stop();
+        m_nextNotificationWake.reset();
+        if (!m_loaded || m_closing || !m_notificationService.IsAvailable())
+        {
+            return;
+        }
+
+        const auto currentSecond = std::chrono::floor<std::chrono::seconds>(now);
+        const auto target = m_notificationScheduler.GetNextWake(
+            currentSecond,
+            m_viewModel->Settings().notifications);
+        if (!target)
+        {
+            return;
+        }
+        m_nextNotificationWake = *target;
+        ArmNotificationTimer(*target, now);
+    }
+
+    void MainWindow::ArmNotificationTimer(
+        std::chrono::sys_seconds const target,
+        std::chrono::system_clock::time_point const now)
+    {
+        auto delay = std::chrono::ceil<std::chrono::milliseconds>(target - now);
+        if (delay <= std::chrono::milliseconds::zero())
+        {
+            delay = std::chrono::milliseconds{ 1 };
+        }
+        m_notificationTimer.Stop();
+        m_notificationTimer.Interval(delay);
+        m_notificationTimer.Start();
+    }
+
+    void MainWindow::ReconcileNotificationSchedule(std::chrono::system_clock::time_point const now)
+    {
+        if (!m_loaded || m_closing)
+        {
+            return;
+        }
+
+        if (!m_notificationService.IsAvailable()
+            || !m_viewModel->Settings().notifications.enabled)
+        {
+            if (m_nextNotificationWake)
+            {
+                m_notificationTimer.Stop();
+                m_nextNotificationWake.reset();
+            }
+            return;
+        }
+
+        const auto currentSecond = std::chrono::floor<std::chrono::seconds>(now);
+        DeliverDueNotifications(currentSecond);
+        const auto expected = m_notificationScheduler.GetNextWake(
+            currentSecond,
+            m_viewModel->Settings().notifications);
+        if (!expected)
+        {
+            m_notificationTimer.Stop();
+            m_nextNotificationWake.reset();
+            return;
+        }
+        if (!m_nextNotificationWake || *m_nextNotificationWake != *expected)
+        {
+            m_nextNotificationWake = *expected;
+            ArmNotificationTimer(*expected, now);
+        }
+    }
+
+    void MainWindow::DeliverDueNotifications(std::chrono::sys_seconds const now)
+    {
+        auto due = m_notificationScheduler.GetDueNotifications(
+            now,
+            m_viewModel->Settings().notifications,
+            m_notificationDeliveryState);
+        if (due.empty())
+        {
+            return;
+        }
+
+        // Re-read before committing an event so a previous process activation is
+        // observed and cannot cause a duplicate notification in this process.
+        m_notificationDeliveryState = m_settingsService->LoadNotificationDeliveryState();
+        due = m_notificationScheduler.GetDueNotifications(
+            now,
+            m_viewModel->Settings().notifications,
+            m_notificationDeliveryState);
+        for (auto const& event : due)
+        {
+            auto updatedState = m_notificationDeliveryState;
+            updatedState.MarkDelivered(event);
+            if (!m_settingsService->SaveNotificationDeliveryState(updatedState))
+            {
+                continue;
+            }
+            m_notificationDeliveryState = std::move(updatedState);
+            static_cast<void>(m_notificationService.ShowScheduled(event));
+        }
+    }
+
     void MainWindow::ResizeForCurrentState()
     {
         if (!m_appWindow)
@@ -477,6 +683,7 @@ namespace winrt::LiangWenPeak::implementation
         RefreshBalanceMenuItem().IsEnabled(
             state.apiFeatureEnabled && state.hasApiKey && !state.isRefreshing);
         ForecastMenuItem().IsChecked(state.forecastEnabled);
+        NotificationMenuItem().IsChecked(state.notificationEnabled);
         ResizeForCurrentState();
     }
 
@@ -492,6 +699,12 @@ namespace winrt::LiangWenPeak::implementation
             m_balanceTimer.Stop();
             m_balanceTimer.Tick(m_balanceTickToken);
             m_nextBalanceRefresh.reset();
+        }
+        if (m_notificationTimer)
+        {
+            m_notificationTimer.Stop();
+            m_notificationTimer.Tick(m_notificationTickToken);
+            m_nextNotificationWake.reset();
         }
     }
 
@@ -543,11 +756,11 @@ namespace winrt::LiangWenPeak::implementation
         }
     }
 
-    void MainWindow::ShowApiSettingsWindow()
+    void MainWindow::ShowSettingsWindow()
     {
-        if (m_apiSettingsWindow)
+        if (m_settingsWindow)
         {
-            m_apiSettingsWindow->ShowOwned();
+            m_settingsWindow->ShowOwned();
             return;
         }
 
@@ -575,10 +788,18 @@ namespace winrt::LiangWenPeak::implementation
                 {
                     return false;
                 }
+                if (strong->m_viewModel->Settings().notifications.enabled)
+                {
+                    static_cast<void>(strong->m_notificationService.EnsureIdentity());
+                }
                 strong->ApplyState();
                 if (result.scheduleChanged)
                 {
                     strong->ScheduleNextBalanceRefresh(std::chrono::system_clock::now());
+                }
+                if (result.notificationScheduleChanged)
+                {
+                    strong->ScheduleNextNotification(std::chrono::system_clock::now());
                 }
                 if (result.immediateRefreshReason)
                 {
@@ -599,13 +820,57 @@ namespace winrt::LiangWenPeak::implementation
             },
             [weak]()
             {
+                auto strong = weak.get();
+                if (!strong || strong->m_closing)
+                {
+                    return winrt::hstring{ L"\u6d4b\u8bd5\u901a\u77e5\u53d1\u9001\u5931\u8d25" };
+                }
+                return strong->m_notificationService.ShowTest()
+                    ? winrt::hstring{ L"\u6d4b\u8bd5\u901a\u77e5\u5df2\u53d1\u9001" }
+                    : strong->m_notificationService.LastFailureMessage();
+            },
+            [weak]() -> std::optional<ApiSettingsWindow::CleanupResetState>
+            {
+                auto strong = weak.get();
+                if (!strong || strong->m_closing)
+                {
+                    return std::nullopt;
+                }
+
+                strong->m_notificationTimer.Stop();
+                strong->m_nextNotificationWake.reset();
+                const auto cleanup = strong->m_cleanupService.Execute();
+
+                const auto now = std::chrono::floor<std::chrono::seconds>(
+                    std::chrono::system_clock::now());
+                strong->m_viewModel->ReloadPersistedStateAfterCleanup(now);
+                strong->m_notificationDeliveryState =
+                    strong->m_settingsService->LoadNotificationDeliveryState();
+                strong->m_themeManager.Reload();
+                strong->ApplyTheme();
+                strong->ApplyWindowPresentation();
+                strong->ApplyState();
+                if (strong->m_loaded)
+                {
+                    strong->ScheduleNextBalanceRefresh(now);
+                    strong->ScheduleNextNotification(now);
+                }
+
+                return ApiSettingsWindow::CleanupResetState{
+                    strong->m_viewModel->CreateSettingsDraft(),
+                    strong->m_themeManager.IsFluentThemeEnabled(),
+                    cleanup.succeeded,
+                    cleanup.UserMessage() };
+            },
+            [weak]()
+            {
                 if (auto strong = weak.get())
                 {
-                    strong->m_apiSettingsWindow = nullptr;
+                    strong->m_settingsWindow = nullptr;
                 }
             });
-        m_apiSettingsWindow = std::move(window);
-        m_apiSettingsWindow->ShowOwned();
+        m_settingsWindow = std::move(window);
+        m_settingsWindow->ShowOwned();
     }
 
     winrt::fire_and_forget MainWindow::ShowAboutDialogAsync()
@@ -683,13 +948,26 @@ namespace winrt::LiangWenPeak::implementation
         Microsoft::UI::Windowing::AppWindowClosingEventArgs const&)
     {
         m_closing = true;
-        if (m_apiSettingsWindow)
+        if (m_settingsWindow)
         {
-            m_apiSettingsWindow->CloseFromOwner();
+            m_settingsWindow->CloseFromOwner();
         }
         CancelFirstFrameReveal();
         m_startupCloaked = false;
         StopTimers();
+        if (m_suspendStatusHandlerAttached)
+        {
+            try
+            {
+                winrt::Microsoft::Windows::System::Power::PowerManager::SystemSuspendStatusChanged(
+                    m_suspendStatusToken);
+            }
+            catch (...)
+            {
+            }
+            m_suspendStatusHandlerAttached = false;
+        }
+        m_notificationService.Shutdown();
         if (m_appWindow)
         {
             m_appWindow.Closing(m_closingToken);

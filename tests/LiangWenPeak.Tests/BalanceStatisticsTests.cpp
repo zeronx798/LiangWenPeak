@@ -331,7 +331,7 @@ namespace
         settings.knownCurrencies = { "CNY", "USD" };
         liangwenpeak::balance::SetWarningBalance(settings, "CNY", Amount("10"));
         liangwenpeak::balance::SetWarningBalance(settings, "USD", Amount("2"));
-        liangwenpeak::balance::ApiSettingsDraft draft(settings, true);
+        liangwenpeak::balance::SettingsDraft draft(settings, true);
 
         const auto available = liangwenpeak::balance::GetAvailableRateWindows(10min);
         expect(available.front() == 10min, "rate window options filter values below refresh interval");

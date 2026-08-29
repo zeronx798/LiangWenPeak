@@ -14,6 +14,15 @@ namespace liangwenpeak::services
     {
     }
 
+    DeploymentPathService::DeploymentPathService(StateProfile const& profile)
+    {
+        if (profile.IsTest())
+        {
+            m_testPortableRoot = profile.TestPortableRoot();
+            m_dataRootOverride = *m_testPortableRoot / "data";
+        }
+    }
+
     std::filesystem::path DeploymentPathService::ExecutablePath() const
     {
         std::vector<wchar_t> buffer(512);
@@ -30,6 +39,28 @@ namespace liangwenpeak::services
             }
             buffer.resize(buffer.size() * 2);
         }
+    }
+
+    std::filesystem::path DeploymentPathService::DeploymentRoot() const
+    {
+        if (m_testPortableRoot)
+        {
+            return *m_testPortableRoot;
+        }
+        return balance::ResolveDeploymentRoot(ExecutablePath());
+    }
+
+    std::filesystem::path DeploymentPathService::LauncherPath() const
+    {
+        if (!m_testPortableRoot)
+        {
+            const auto adjacentLauncher = ExecutablePath().parent_path() / "LiangWenPeak.exe";
+            if (std::filesystem::is_regular_file(adjacentLauncher))
+            {
+                return adjacentLauncher;
+            }
+        }
+        return DeploymentRoot() / "LiangWenPeak.exe";
     }
 
     std::filesystem::path DeploymentPathService::DataRoot() const

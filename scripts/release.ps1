@@ -26,6 +26,12 @@ try {
     Clear-PackageArtifacts -Context $context
 
     if (-not $SkipTests) {
+        Write-Host '[TEST] Auditing integration-test isolation...'
+        & (Join-Path $context.RepositoryRoot 'tests\LiangWenPeak.Build.Tests\Test-TestIsolation.ps1')
+        if (-not $?) {
+            throw 'ERROR: test isolation audit failed.'
+        }
+
         Write-Host '[TEST] Running native unit tests...'
         Invoke-TestExecutable -TestExecutable (Join-Path $context.BuildOutput 'LiangWenPeak.Tests.exe')
 

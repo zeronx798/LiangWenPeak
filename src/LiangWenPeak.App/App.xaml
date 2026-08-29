@@ -4,6 +4,10 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
             <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#081426" />
             <SolidColorBrush x:Key="PrimaryTextBrush" Color="#F3F7FC" />
             <SolidColorBrush x:Key="SecondaryTextBrush" Color="#D5DEEA" />
@@ -50,6 +54,15 @@
                 <Setter Property="FontFamily" Value="Segoe UI Variable Text" />
                 <Setter Property="FontSize" Value="12" />
                 <Setter Property="Foreground" Value="{StaticResource SecondaryTextBrush}" />
+            </Style>
+
+            <Style
+                x:Key="CriticalButtonStyle"
+                BasedOn="{StaticResource DefaultButtonStyle}"
+                TargetType="Button">
+                <Setter Property="Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+                <Setter Property="Background" Value="{ThemeResource SystemFillColorCriticalBackgroundBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource SystemFillColorCriticalBrush}" />
             </Style>
         </ResourceDictionary>
     </Application.Resources>

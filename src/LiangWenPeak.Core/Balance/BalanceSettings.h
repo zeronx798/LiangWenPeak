@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DecimalAmount.h"
+#include "../Notifications/NotificationSettings.h"
 #include "../Time/BalanceRefreshSchedule.h"
 
 #include <array>
@@ -47,6 +48,7 @@ namespace liangwenpeak::balance
         PredictionAlgorithm preferredAlgorithm = PredictionAlgorithm::SlidingAverage;
         std::map<std::string, DecimalAmount, std::less<>> warningBalances;
         std::vector<std::string> knownCurrencies{ "CNY" };
+        notifications::NotificationSettings notifications;
     };
 
     enum class ApiKeyDraftAction
@@ -56,10 +58,10 @@ namespace liangwenpeak::balance
         Replace,
     };
 
-    class ApiSettingsDraft final
+    class SettingsDraft final
     {
     public:
-        ApiSettingsDraft(BalanceSettings persistedSettings, bool hasApiKey);
+        SettingsDraft(BalanceSettings persistedSettings, bool hasApiKey);
 
         [[nodiscard]] BalanceSettings const& Settings() const noexcept;
         [[nodiscard]] BalanceSettings& Settings() noexcept;

@@ -59,6 +59,9 @@
     <ClInclude Include="Services\CredentialService.h">
       <Filter>Services</Filter>
     </ClInclude>
+    <ClInclude Include="Services\CleanupService.h">
+      <Filter>Services</Filter>
+    </ClInclude>
     <ClInclude Include="Services\DeepSeekClient.h">
       <Filter>Services</Filter>
     </ClInclude>
@@ -68,7 +71,16 @@
     <ClInclude Include="Services\HistoryIdentityService.h">
       <Filter>Services</Filter>
     </ClInclude>
+    <ClInclude Include="Services\NotificationIdentityService.h">
+      <Filter>Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\NotificationService.h">
+      <Filter>Services</Filter>
+    </ClInclude>
     <ClInclude Include="Services\SettingsService.h">
+      <Filter>Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\StateProfile.h">
       <Filter>Services</Filter>
     </ClInclude>
     <ClInclude Include="ViewModels\MainViewModel.h">
@@ -100,6 +112,9 @@
     <ClCompile Include="Services\CredentialService.cpp">
       <Filter>Services</Filter>
     </ClCompile>
+    <ClCompile Include="Services\CleanupService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
     <ClCompile Include="Services\DeepSeekClient.cpp">
       <Filter>Services</Filter>
     </ClCompile>
@@ -109,7 +124,16 @@
     <ClCompile Include="Services\HistoryIdentityService.cpp">
       <Filter>Services</Filter>
     </ClCompile>
+    <ClCompile Include="Services\NotificationIdentityService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\NotificationService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
     <ClCompile Include="Services\SettingsService.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\StateProfile.cpp">
       <Filter>Services</Filter>
     </ClCompile>
     <ClCompile Include="ViewModels\MainViewModel.cpp">

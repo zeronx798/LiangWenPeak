@@ -20,12 +20,18 @@ namespace liangwenpeak::services
         }
     }
 
+    CredentialService::CredentialService(StateProfile const& profile)
+        : m_resourceName(profile.ApiCredentialResource()),
+          m_userName(profile.ApiCredentialUserName())
+    {
+    }
+
     std::optional<winrt::hstring> CredentialService::TryGetApiKey() const noexcept
     {
         try
         {
             const winrt::Windows::Security::Credentials::PasswordVault vault;
-            auto credential = vault.Retrieve(ResourceName, UserName);
+            auto credential = vault.Retrieve(m_resourceName, m_userName);
             credential.RetrievePassword();
             auto password = credential.Password();
             if (!password.empty())
@@ -50,27 +56,37 @@ namespace liangwenpeak::services
         const auto trimmed = Trim(apiKey);
         if (trimmed.empty())
         {
-            ClearApiKey();
+            static_cast<void>(ClearApiKey());
             return;
         }
 
-        ClearApiKey();
+        if (!ClearApiKey())
+        {
+            throw winrt::hresult_error(E_FAIL, L"Unable to replace the LiangWenPeak API credential");
+        }
         const winrt::Windows::Security::Credentials::PasswordVault vault;
-        vault.Add(winrt::Windows::Security::Credentials::PasswordCredential{ ResourceName, UserName, trimmed });
+        vault.Add(winrt::Windows::Security::Credentials::PasswordCredential{
+            m_resourceName,
+            m_userName,
+            trimmed });
     }
 
-    void CredentialService::ClearApiKey() const noexcept
+    bool CredentialService::ClearApiKey() const noexcept
     {
         try
         {
             const winrt::Windows::Security::Credentials::PasswordVault vault;
-            auto credential = vault.Retrieve(ResourceName, UserName);
+            auto credential = vault.Retrieve(m_resourceName, m_userName);
             vault.Remove(credential);
+            return true;
+        }
+        catch (winrt::hresult_error const& error)
+        {
+            return error.code() == HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
         }
         catch (...)
         {
-            // Removing a credential that does not exist is already the desired state.
+            return false;
         }
     }
 }
-
