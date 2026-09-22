@@ -15,6 +15,7 @@ namespace liangwenpeak::services
     {
         constexpr wchar_t ApiFeatureEnabledName[] = L"ApiFeatureEnabled";
         constexpr wchar_t ForecastEnabledName[] = L"BalanceForecastEnabled";
+        constexpr wchar_t AlwaysOnTopName[] = L"AlwaysOnTop";
         constexpr wchar_t SelectedCurrencyName[] = L"SelectedCurrency";
         constexpr wchar_t BalanceRefreshIntervalName[] = L"BalanceRefreshIntervalMinutes";
         constexpr wchar_t RateWindowName[] = L"BalanceRateWindowSeconds";
@@ -133,6 +134,30 @@ namespace liangwenpeak::services
                 REG_QWORD,
                 reinterpret_cast<BYTE const*>(&value),
                 sizeof(value)) == ERROR_SUCCESS;
+        }
+
+        bool WriteDwordSetting(
+            std::wstring const& settingsPath,
+            wchar_t const* const name,
+            DWORD const value) noexcept
+        {
+            HKEY key{};
+            if (::RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                settingsPath.c_str(),
+                0,
+                nullptr,
+                REG_OPTION_NON_VOLATILE,
+                KEY_SET_VALUE,
+                nullptr,
+                &key,
+                nullptr) != ERROR_SUCCESS)
+            {
+                return false;
+            }
+            const bool saved = WriteDword(key, name, value);
+            ::RegCloseKey(key);
+            return saved;
         }
 
         std::optional<std::chrono::sys_seconds> ParseTransitionTimestamp(
@@ -363,6 +388,24 @@ namespace liangwenpeak::services
         auto settings = LoadBalanceSettings();
         settings.forecastEnabled = enabled;
         return SaveBalanceSettings(settings);
+    }
+
+    bool SettingsService::LoadAlwaysOnTop() const noexcept
+    {
+        try
+        {
+            const auto value = ReadDword(m_settingsPath, AlwaysOnTopName);
+            return !value || *value != 0;
+        }
+        catch (...)
+        {
+            return true;
+        }
+    }
+
+    bool SettingsService::SaveAlwaysOnTop(bool const enabled) const noexcept
+    {
+        return WriteDwordSetting(m_settingsPath, AlwaysOnTopName, enabled ? 1U : 0U);
     }
 
     std::chrono::minutes SettingsService::LoadBalanceRefreshInterval() const noexcept

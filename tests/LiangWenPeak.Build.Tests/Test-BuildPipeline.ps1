@@ -42,6 +42,7 @@ function New-RequiredPortableFixture {
 
     $applicationDirectory = Join-Path $Root "app-$Version"
     New-Item -ItemType Directory -Path (Join-Path $applicationDirectory 'Microsoft.UI.Xaml') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $applicationDirectory 'resources') -Force | Out-Null
     foreach ($relativePath in @(
         'LiangWenPeak.exe',
         'current.txt',
@@ -50,6 +51,7 @@ function New-RequiredPortableFixture {
         "app-$Version\ApiSettingsWindow.xbf",
         "app-$Version\MainWindow.xbf",
         "app-$Version\LiangWenPeak.App.pri",
+        "app-$Version\resources\pricing-calendar.json",
         "app-$Version\Microsoft.WindowsAppRuntime.dll",
         "app-$Version\Microsoft.ui.xaml.dll"
     )) {

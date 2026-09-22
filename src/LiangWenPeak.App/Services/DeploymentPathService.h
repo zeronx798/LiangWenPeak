@@ -18,6 +18,7 @@ namespace liangwenpeak::services
         [[nodiscard]] std::filesystem::path DeploymentRoot() const;
         [[nodiscard]] std::filesystem::path LauncherPath() const;
         [[nodiscard]] std::filesystem::path DataRoot() const;
+        [[nodiscard]] std::filesystem::path CanonicalDataRoot() const;
 
     private:
         std::optional<std::filesystem::path> m_dataRootOverride;

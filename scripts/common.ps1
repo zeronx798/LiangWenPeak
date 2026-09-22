@@ -529,6 +529,7 @@ function Assert-PackageBuildOutputs {
     $requiredFiles = @(
         (Join-Path $Context.BuildOutput 'LiangWenPeak.exe'),
         (Join-Path $Context.BuildOutput 'LiangWenPeak.App.exe'),
+        (Join-Path $Context.BuildOutput 'resources\pricing-calendar.json'),
         (Join-Path $Context.BuildOutput 'App.xbf'),
         (Join-Path $Context.BuildOutput 'ApiSettingsWindow.xbf'),
         (Join-Path $Context.BuildOutput 'MainWindow.xbf'),
@@ -584,6 +585,7 @@ function Assert-PortablePackage {
         (Join-Path $applicationDirectory 'ApiSettingsWindow.xbf'),
         (Join-Path $applicationDirectory 'MainWindow.xbf'),
         (Join-Path $applicationDirectory 'LiangWenPeak.App.pri'),
+        (Join-Path $applicationDirectory 'resources\pricing-calendar.json'),
         (Join-Path $applicationDirectory 'Microsoft.WindowsAppRuntime.dll'),
         (Join-Path $applicationDirectory 'Microsoft.ui.xaml.dll')
     )

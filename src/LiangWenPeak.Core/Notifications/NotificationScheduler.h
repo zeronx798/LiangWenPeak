@@ -44,6 +44,9 @@ namespace liangwenpeak::notifications
     class NotificationScheduler final
     {
     public:
+        NotificationScheduler() = default;
+        explicit NotificationScheduler(pricing::PricingCalendar calendar) noexcept;
+
         [[nodiscard]] std::vector<NotificationEvent> GetDueNotifications(
             std::chrono::sys_seconds now,
             NotificationSettings settings,

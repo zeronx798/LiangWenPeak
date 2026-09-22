@@ -287,6 +287,10 @@ $etaLabel = ([char]0x9884).ToString() + [char]0x8BA1 + [char]0x89E6 + [char]0x5E
 $settingsTitle = ([char]0x8BBE).ToString() + [char]0x7F6E
 $settingsMenuLabel = $settingsTitle + '...'
 $fluentThemeLabel = 'Fluent ' + [char]0x4E3B + [char]0x9898
+$enableNotificationLabel = ([char]0x542F).ToString() + [char]0x7528 +
+    [char]0x901A + [char]0x77E5
+$disableNotificationLabel = ([char]0x5173).ToString() + [char]0x95ED +
+    [char]0x901A + [char]0x77E5
 $settingsScrollRegionLabel = $settingsTitle + [char]0x6EDA + [char]0x52A8 +
     [char]0x533A + [char]0x57DF
 $undoLabel = ([char]0x64A4).ToString() + [char]0x9500
@@ -874,6 +878,9 @@ try {
         if ($notificationMenuToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::Off) {
             throw 'Notification quick toggle did not reflect the persisted disabled default.'
         }
+        if ($notificationMenu.Current.Name -ne $enableNotificationLabel) {
+            throw 'Disabled notification menu did not expose enable-style text.'
+        }
         $notificationMenuToggle.Toggle()
         Start-Sleep -Milliseconds 150
         if ((Get-ItemPropertyValue `
@@ -890,6 +897,9 @@ try {
             [Windows.Automation.TogglePattern]::Pattern)
         if ($notificationMenuToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::On) {
             throw 'Notification quick toggle did not synchronize after persistence.'
+        }
+        if ($notificationMenu.Current.Name -ne $disableNotificationLabel) {
+            throw 'Enabled notification menu did not expose disable-style text.'
         }
         $notificationMenuToggle.Toggle()
         Start-Sleep -Milliseconds 150
@@ -1422,6 +1432,68 @@ try {
         }
     } finally {
         Stop-TestApplication $application
+    }
+
+    $topmostApplication = Start-TestApplication $applicationPath $applicationDirectory
+    try {
+        $topmostHandle = $topmostApplication.MainWindowHandle
+        $topmostRoot = [Windows.Automation.AutomationElement]::FromHandle($topmostHandle)
+        Start-Sleep -Seconds 1
+        $more = Find-Element `
+            $topmostRoot `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'MoreButton'
+        Invoke-Element $more
+        $alwaysOnTop = Find-ToggleElementByAutomationId `
+            ([Windows.Automation.AutomationElement]::RootElement) `
+            'AlwaysOnTopMenuItem'
+        if ($null -eq $alwaysOnTop) {
+            throw 'Always-on-top menu item was not found.'
+        }
+        $alwaysOnTopToggle = $alwaysOnTop.GetCurrentPattern(
+            [Windows.Automation.TogglePattern]::Pattern)
+        if ($alwaysOnTopToggle.Current.ToggleState -ne [Windows.Automation.ToggleState]::On) {
+            throw 'Always-on-top did not begin from its persisted enabled state.'
+        }
+        $alwaysOnTopToggle.Toggle()
+        Start-Sleep -Milliseconds 200
+        if ((Get-ItemPropertyValue `
+                -Path $TestProfile.RegistryPath `
+                -Name AlwaysOnTop) -ne 0 -or
+            ([LiangWenPeakBalanceUiTests.NativeMethods]::GetWindowLongPtr(
+                $topmostHandle,
+                -20).ToInt64() -band 0x8) -ne 0) {
+            throw 'Disabling always-on-top did not apply and persist immediately.'
+        }
+    } finally {
+        Stop-TestApplication $topmostApplication
+    }
+
+    $restoredApplication = Start-TestApplication $applicationPath $applicationDirectory
+    try {
+        $restoredHandle = $restoredApplication.MainWindowHandle
+        if (([LiangWenPeakBalanceUiTests.NativeMethods]::GetWindowLongPtr(
+                $restoredHandle,
+                -20).ToInt64() -band 0x8) -ne 0) {
+            throw 'Always-on-top was re-enabled during restart.'
+        }
+        $restoredRoot = [Windows.Automation.AutomationElement]::FromHandle($restoredHandle)
+        Start-Sleep -Seconds 1
+        $more = Find-Element `
+            $restoredRoot `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
+            'MoreButton'
+        Invoke-Element $more
+        $alwaysOnTop = Find-ToggleElementByAutomationId `
+            ([Windows.Automation.AutomationElement]::RootElement) `
+            'AlwaysOnTopMenuItem'
+        if ($alwaysOnTop.GetCurrentPattern(
+                [Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
+            [Windows.Automation.ToggleState]::Off) {
+            throw 'Always-on-top menu did not restore the persisted disabled state.'
+        }
+    } finally {
+        Stop-TestApplication $restoredApplication
     }
 
     Write-Host "PASS: balance extension UI at $([int]($ExpectedDpi / 96 * 100))% DPI"

@@ -3,6 +3,7 @@
 #include "Balance/BalanceSettings.h"
 #include "Notifications/NotificationScheduler.h"
 #include "Notifications/NotificationSettings.h"
+#include "Pricing/PricingCalendar.h"
 #include "Time/BeijingTime.h"
 
 #include <chrono>
@@ -244,6 +245,28 @@ namespace
             scheduler.GetDueNotifications(AtBeijingTime(9, 0), settings, {}).empty()
                 && !scheduler.GetNextWake(AtBeijingTime(8, 0), settings),
             "disabled persisted settings produce no delivery or schedule");
+
+        const auto holidayCalendar = liangwenpeak::pricing::PricingCalendar::FromJson(R"json({
+            "schema_version": 1,
+            "timezone": "Asia/Shanghai",
+            "years": {
+                "2026": { "all_day_off_peak": [["2026-10-01", "2026-10-07"]] }
+            }
+        })json");
+        const NotificationScheduler holidayScheduler{ holidayCalendar };
+        settings.enabled = true;
+        expect(
+            holidayScheduler.GetNextWake(
+                AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 9 }, std::chrono::day{ 30 } }, 18, 0),
+                settings)
+                == AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 10 }, std::chrono::day{ 8 } }, 8, 50),
+            "notification schedule skips every fake transition inside a managed holiday");
+        expect(
+            holidayScheduler.GetDueNotifications(
+                AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 10 }, std::chrono::day{ 2 } }, 9, 0),
+                settings,
+                {}).empty(),
+            "managed holiday does not emit weekday peak notifications");
     }
 }
 
