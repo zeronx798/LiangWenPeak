@@ -117,15 +117,14 @@ namespace liangwenpeak::balance
             std::int64_t seconds;
             wchar_t const* label;
         };
-        constexpr std::array<Unit, 5> units = {
+        constexpr std::array<Unit, 4> units = {
             Unit{ 30LL * 24 * 60 * 60, L"\u6708" },
             Unit{ 24LL * 60 * 60, L"\u5929" },
             Unit{ 60LL * 60, L"\u65f6" },
             Unit{ 60, L"\u5206" },
-            Unit{ 1, L"\u79d2" },
         };
 
-        auto remaining = eta.remaining.count();
+        auto remaining = eta.remaining.count() / 60 * 60;
         std::wstring result = L"\u7ea6 ";
         int emitted{};
         for (auto const& unit : units)

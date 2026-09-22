@@ -44,6 +44,9 @@
     <ClInclude Include="MainWindowLayout.h">
       <Filter>Application</Filter>
     </ClInclude>
+    <ClInclude Include="MenuPresentation.h">
+      <Filter>Application</Filter>
+    </ClInclude>
     <ClInclude Include="pch.h">
       <Filter>Configuration</Filter>
     </ClInclude>
@@ -69,6 +72,9 @@
       <Filter>Services</Filter>
     </ClInclude>
     <ClInclude Include="Services\HistoryIdentityService.h">
+      <Filter>Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\InstanceCoordinator.h">
       <Filter>Services</Filter>
     </ClInclude>
     <ClInclude Include="Services\NotificationIdentityService.h">
@@ -124,6 +130,9 @@
     <ClCompile Include="Services\HistoryIdentityService.cpp">
       <Filter>Services</Filter>
     </ClCompile>
+    <ClCompile Include="Services\InstanceCoordinator.cpp">
+      <Filter>Services</Filter>
+    </ClCompile>
     <ClCompile Include="Services\NotificationIdentityService.cpp">
       <Filter>Services</Filter>
     </ClCompile>
@@ -153,5 +162,8 @@
     <None Include="packages.config">
       <Filter>Configuration</Filter>
     </None>
+    <Content Include="..\..\resources\pricing-calendar.json">
+      <Filter>Configuration</Filter>
+    </Content>
   </ItemGroup>
 </Project>

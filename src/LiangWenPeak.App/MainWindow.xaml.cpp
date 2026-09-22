@@ -1,12 +1,14 @@
 #include "pch.h"
 #include "MainWindow.xaml.h"
 #include "MainWindowLayout.h"
+#include "MenuPresentation.h"
 
 #if __has_include("MainWindow.g.cpp")
 #include "MainWindow.g.cpp"
 #endif
 
 #include <dwmapi.h>
+#include <commctrl.h>
 #include <shellscalingapi.h>
 #include <winrt/Microsoft.UI.Xaml.Documents.h>
 
@@ -14,6 +16,7 @@
 #include "Services/DeepSeekClient.h"
 #include "Services/DeploymentPathService.h"
 #include "Services/HistoryIdentityService.h"
+#include "Services/InstanceCoordinator.h"
 #include "Services/SettingsService.h"
 #include "Balance/BalanceHistoryStore.h"
 #include "Time/BalanceRefreshSchedule.h"
@@ -23,6 +26,7 @@
 #include <utility>
 
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shcore.lib")
 
 namespace winrt::LiangWenPeak::implementation
@@ -267,7 +271,13 @@ namespace winrt::LiangWenPeak::implementation
     void MainWindow::OnAlwaysOnTopClick(IInspectable const& sender, RoutedEventArgs const&)
     {
         const auto item = sender.as<ToggleMenuFlyoutItem>();
-        m_presenter.IsAlwaysOnTop(item.IsChecked());
+        const bool enabled = item.IsChecked();
+        if (!m_settingsService->SaveAlwaysOnTop(enabled))
+        {
+            item.IsChecked(m_settingsService->LoadAlwaysOnTop());
+            return;
+        }
+        m_presenter.IsAlwaysOnTop(enabled);
     }
 
     void MainWindow::OnFluentThemeClick(IInspectable const& sender, RoutedEventArgs const&)
@@ -335,6 +345,47 @@ namespace winrt::LiangWenPeak::implementation
         Close();
     }
 
+    void MainWindow::ActivateFromSecondaryLaunch() noexcept
+    {
+        try
+        {
+            if (m_settingsWindow)
+            {
+                m_settingsWindow->ShowOwned();
+                return;
+            }
+            if (m_windowHandle == nullptr || !::IsWindow(m_windowHandle))
+            {
+                return;
+            }
+
+            if (::IsIconic(m_windowHandle))
+            {
+                static_cast<void>(::ShowWindow(m_windowHandle, SW_RESTORE));
+            }
+            else
+            {
+                static_cast<void>(::ShowWindow(m_windowHandle, SW_SHOW));
+            }
+            Activate();
+            static_cast<void>(::SetWindowPos(
+                m_windowHandle,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW));
+            static_cast<void>(::BringWindowToTop(m_windowHandle));
+            static_cast<void>(::SetForegroundWindow(m_windowHandle));
+            static_cast<void>(::SetFocus(m_windowHandle));
+        }
+        catch (...)
+        {
+            // Foreground activation is best effort and never changes topmost state.
+        }
+    }
+
     void MainWindow::ConfigureWindow()
     {
         m_appWindow = AppWindow();
@@ -350,6 +401,13 @@ namespace winrt::LiangWenPeak::implementation
 
         const auto windowNative = this->try_as<::IWindowNative>();
         winrt::check_hresult(windowNative->get_WindowHandle(&m_windowHandle));
+
+        winrt::check_bool(::SetWindowSubclass(
+            m_windowHandle,
+            &MainWindow::ActivationSubclassProc,
+            1,
+            reinterpret_cast<DWORD_PTR>(this)));
+        m_activationSubclassAttached = true;
 
         m_closingToken = m_appWindow.Closing({ this, &MainWindow::OnWindowClosing });
     }
@@ -383,8 +441,9 @@ namespace winrt::LiangWenPeak::implementation
             WindowHeightInPixels(m_windowHandle, m_viewModel->State(), dpi) });
         m_appliedClientHeightDips = clientHeightDips;
         m_appliedWindowDpi = dpi;
-        m_presenter.IsAlwaysOnTop(true);
-        AlwaysOnTopMenuItem().IsChecked(true);
+        const bool alwaysOnTop = m_settingsService->LoadAlwaysOnTop();
+        m_presenter.IsAlwaysOnTop(alwaysOnTop);
+        AlwaysOnTopMenuItem().IsChecked(alwaysOnTop);
     }
 
     void MainWindow::ArmFirstFrameReveal()
@@ -683,7 +742,11 @@ namespace winrt::LiangWenPeak::implementation
         RefreshBalanceMenuItem().IsEnabled(
             state.apiFeatureEnabled && state.hasApiKey && !state.isRefreshing);
         ForecastMenuItem().IsChecked(state.forecastEnabled);
-        NotificationMenuItem().IsChecked(state.notificationEnabled);
+        const auto notificationMenu = liangwenpeak::ui::GetNotificationMenuPresentation(
+            state.notificationEnabled);
+        NotificationMenuItem().IsChecked(notificationMenu.checked);
+        NotificationMenuItem().Text(notificationMenu.text);
+        NotificationMenuItem().Icon().as<FontIcon>().Glyph(notificationMenu.glyph);
         ResizeForCurrentState();
     }
 
@@ -968,9 +1031,43 @@ namespace winrt::LiangWenPeak::implementation
             m_suspendStatusHandlerAttached = false;
         }
         m_notificationService.Shutdown();
+        if (m_activationSubclassAttached)
+        {
+            static_cast<void>(::RemoveWindowSubclass(
+                m_windowHandle,
+                &MainWindow::ActivationSubclassProc,
+                1));
+            m_activationSubclassAttached = false;
+        }
         if (m_appWindow)
         {
             m_appWindow.Closing(m_closingToken);
         }
+    }
+
+    HWND MainWindow::WindowHandle() const noexcept
+    {
+        return m_windowHandle;
+    }
+
+    LRESULT CALLBACK MainWindow::ActivationSubclassProc(
+        HWND const windowHandle,
+        UINT const message,
+        WPARAM const wParam,
+        LPARAM const lParam,
+        UINT_PTR const subclassId,
+        DWORD_PTR const referenceData)
+    {
+        static_cast<void>(subclassId);
+        if (message == liangwenpeak::services::InstanceCoordinator::ActivationMessage())
+        {
+            auto const window = reinterpret_cast<MainWindow*>(referenceData);
+            if (window != nullptr)
+            {
+                window->ActivateFromSecondaryLaunch();
+            }
+            return 0;
+        }
+        return ::DefSubclassProc(windowHandle, message, wParam, lParam);
     }
 }

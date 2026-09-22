@@ -1,4 +1,6 @@
 #include "Pricing/PricingScheduleService.h"
+#include "Pricing/PricingCalendar.h"
+#include "Balance/DeploymentPaths.h"
 #include "Time/BalanceRefreshSchedule.h"
 #include "Time/BeijingTime.h"
 #include "Time/TimeFormatter.h"
@@ -6,14 +8,17 @@
 #include "NotificationTests.h"
 #include "AppTheme/WindowsVersionDetector.h"
 #include "MainWindowLayout.h"
+#include "MenuPresentation.h"
 
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <string_view>
 
 namespace
 {
     using liangwenpeak::pricing::PricingPeriod;
+    using liangwenpeak::pricing::PricingCalendar;
     using liangwenpeak::pricing::PricingScheduleService;
     using liangwenpeak::time::BeijingTime;
     using namespace std::chrono_literals;
@@ -69,6 +74,25 @@ namespace
     BeijingTime AtBeijingTime(int const hour, int const minute, int const second)
     {
         return AtBeijingTime(MondayDate, hour, minute, second);
+    }
+
+    PricingCalendar TestHolidayCalendar()
+    {
+        return PricingCalendar::FromJson(R"json({
+            "schema_version": 1,
+            "timezone": "Asia/Shanghai",
+            "years": {
+                "2026": {
+                    "all_day_off_peak": [
+                        ["2026-09-25", "2026-09-27"],
+                        ["2026-10-01", "2026-10-07"],
+                        ["2026-11-11", "2026-11-11"],
+                        ["2026-11-30", "2026-12-02"],
+                        ["2026-12-31", "2027-01-01"]
+                    ]
+                }
+            }
+        })json");
     }
 
     void VerifyWeekdayPeriodBoundaries(TestRunner& tests)
@@ -219,6 +243,9 @@ namespace
         tests.Expect(noonValley.nextRange.start == 14h, "Monday 12:56 next period starts at 14:00");
         tests.Expect(noonValley.nextRange.end == 18h, "Monday 12:56 next period ends at 18:00");
         tests.Expect(noonValley.nextRange.endDayOffset == std::chrono::days{ 0 }, "Monday 14:00-18:00 stays on one date");
+        tests.Expect(
+            liangwenpeak::time::FormatPeriodRange(noonValley.nextRange) == L"14:00 - 18:00",
+            "ordinary same-day range keeps the compact format");
 
         const auto afternoonPeak = service.GetNextTransition(AtBeijingTime(17, 0, 0));
         tests.Expect(afternoonPeak.nextPeriod == PricingPeriod::Valley, "Monday 17:00 next period is valley");
@@ -226,7 +253,7 @@ namespace
         tests.Expect(afternoonPeak.nextRange.end == 9h, "Monday overnight valley ends at 09:00");
         tests.Expect(afternoonPeak.nextRange.endDayOffset == std::chrono::days{ 1 }, "Monday overnight valley crosses one date");
         tests.Expect(
-            liangwenpeak::time::FormatPeriodRange(afternoonPeak.nextRange) == L"18:00 \u2014 09:00",
+            liangwenpeak::time::FormatPeriodRange(afternoonPeak.nextRange) == L"18:00 - 09:00",
             "ordinary overnight range keeps the compact format");
 
         const auto fridayPeak = service.GetNextTransition(AtBeijingTime(FridayDate, 17, 0, 0));
@@ -234,15 +261,146 @@ namespace
         tests.Expect(fridayPeak.nextRange.endDayOffset == std::chrono::days{ 3 }, "Friday valley ends three dates later");
         tests.Expect(fridayPeak.nextRange.endWeekday == std::chrono::Monday, "Friday valley ends on Monday");
         tests.Expect(
-            liangwenpeak::time::FormatPeriodRange(fridayPeak.nextRange) == L"18:00 \u2014 \u5468\u4e00 09:00",
-            "Friday next valley range names Monday");
+            liangwenpeak::time::FormatPeriodRange(fridayPeak.nextRange) == L"18:00 - \u5468\u4e00 09:00",
+            "Friday next valley range keeps the ordinary Monday label");
 
         const auto weekendValley = service.GetNextTransition(AtBeijingTime(FridayDate, 20, 0, 0));
         tests.Expect(weekendValley.nextRange.startDayOffset == std::chrono::days{ 3 }, "Friday evening next peak starts Monday");
         tests.Expect(weekendValley.nextRange.startWeekday == std::chrono::Monday, "Friday evening next range starts on Monday");
         tests.Expect(
-            liangwenpeak::time::FormatPeriodRange(weekendValley.nextRange) == L"\u5468\u4e00 09:00 \u2014 12:00",
-            "weekend valley next peak range names Monday");
+            liangwenpeak::time::FormatPeriodRange(weekendValley.nextRange) == L"\u5468\u4e00 09:00 - 12:00",
+            "weekend valley next peak range keeps the ordinary Monday label");
+    }
+
+    void VerifyHolidayCalendar(TestRunner& tests)
+    {
+        const auto calendar = TestHolidayCalendar();
+        tests.Expect(calendar.LoadedSuccessfully(), "in-memory managed calendar parses");
+        tests.Expect(calendar.HasCalendarData(std::chrono::year{ 2026 }), "calendar reports managed 2026 data");
+        tests.Expect(!calendar.HasCalendarData(std::chrono::year{ 2028 }), "unknown calendar year has no data");
+
+        const auto date = [](int const year, unsigned const month, unsigned const day)
+        {
+            return std::chrono::sys_days{ std::chrono::year{ year } / month / day };
+        };
+        tests.Expect(!calendar.IsAllDayOffPeak(date(2026, 9, 24)), "day before holiday is not overridden");
+        tests.Expect(calendar.IsAllDayOffPeak(date(2026, 9, 25)), "holiday range first day is overridden");
+        tests.Expect(calendar.IsAllDayOffPeak(date(2026, 9, 27)), "holiday range last day is overridden");
+        tests.Expect(!calendar.IsAllDayOffPeak(date(2026, 9, 28)), "day after holiday is not overridden");
+        tests.Expect(calendar.IsAllDayOffPeak(date(2026, 11, 11)), "single-day holiday is overridden");
+        tests.Expect(calendar.IsAllDayOffPeak(date(2026, 12, 1)), "continuous range can cross a month");
+        tests.Expect(calendar.IsAllDayOffPeak(date(2026, 12, 31)), "cross-year range starts in December");
+        tests.Expect(calendar.IsAllDayOffPeak(date(2027, 1, 1)), "cross-year range continues in January");
+        tests.Expect(calendar.HasCalendarData(std::chrono::year{ 2027 }), "cross-year range reports destination-year data");
+
+        tests.Expect(!PricingCalendar::FromJson("not json").LoadedSuccessfully(), "malformed calendar falls back");
+        tests.Expect(
+            !PricingCalendar::FromJson(R"({"schema_version":2,"timezone":"Asia/Shanghai","years":{}})")
+                .LoadedSuccessfully(),
+            "unsupported calendar schema falls back");
+        tests.Expect(
+            !PricingCalendar::LoadFromFile(L"missing-pricing-calendar-fixture.json").LoadedSuccessfully(),
+            "missing calendar file falls back");
+
+        const PricingScheduleService service{ calendar };
+        tests.Expect(
+            service.GetPricingPeriod(AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 9 }, std::chrono::day{ 22 } }, 9, 0, 0)) == PricingPeriod::Peak,
+            "ordinary weekday remains peak at 09:00");
+        tests.Expect(
+            service.GetPricingPeriod(AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 9 }, std::chrono::day{ 20 } }, 9, 0, 0)) == PricingPeriod::Valley,
+            "make-up work Sunday remains all-day valley");
+        tests.Expect(
+            service.GetPricingPeriod(AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 9 }, std::chrono::day{ 25 } }, 9, 0, 0)) == PricingPeriod::Valley,
+            "weekday statutory holiday is all-day valley");
+        tests.Expect(
+            service.GetPricingPeriod(AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 10 }, std::chrono::day{ 1 } }, 14, 0, 0)) == PricingPeriod::Valley,
+            "October holiday first day is valley");
+        tests.Expect(
+            service.GetPricingPeriod(AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 10 }, std::chrono::day{ 7 } }, 14, 0, 0)) == PricingPeriod::Valley,
+            "October holiday last day is valley");
+        tests.Expect(
+            service.GetPricingPeriod(AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 10 }, std::chrono::day{ 8 } }, 9, 0, 0)) == PricingPeriod::Peak,
+            "first weekday after October holiday is peak");
+        tests.Expect(
+            service.GetPricingPeriod(AtBeijingTime({ std::chrono::year{ 2026 }, std::chrono::month{ 10 }, std::chrono::day{ 10 } }, 9, 0, 0)) == PricingPeriod::Valley,
+            "make-up work Saturday remains all-day valley");
+
+        const auto septemberValley = service.GetNextTransition(AtBeijingTime(
+            { std::chrono::year{ 2026 }, std::chrono::month{ 9 }, std::chrono::day{ 24 } }, 17, 0, 0));
+        tests.Expect(
+            liangwenpeak::time::FormatPeriodRange(septemberValley.nextRange)
+                == L"18:00 - 9 \u6708 28 \u65e5 09:00",
+            "holiday range ending on Monday uses the unambiguous date");
+
+        const auto september = service.GetNextTransition(AtBeijingTime(
+            { std::chrono::year{ 2026 }, std::chrono::month{ 9 }, std::chrono::day{ 24 } }, 18, 0, 0));
+        tests.Expect(
+            september.utcInstant == AtBeijingTime(
+                { std::chrono::year{ 2026 }, std::chrono::month{ 9 }, std::chrono::day{ 28 } }, 9, 0, 0).UtcInstant(),
+            "September transition skips holiday and weekend");
+        tests.Expect(
+            liangwenpeak::time::FormatPeriodRange(september.nextRange)
+                == L"9 \u6708 28 \u65e5 09:00 - 12:00",
+            "holiday transition formatter shows the actual date");
+
+        const auto octoberValley = service.GetNextTransition(AtBeijingTime(
+            { std::chrono::year{ 2026 }, std::chrono::month{ 9 }, std::chrono::day{ 30 } }, 17, 0, 0));
+        tests.Expect(
+            liangwenpeak::time::FormatPeriodRange(octoberValley.nextRange)
+                == L"18:00 - 10 \u6708 8 \u65e5 09:00",
+            "National Day holiday range uses the unambiguous date");
+
+        const auto october = service.GetNextTransition(AtBeijingTime(
+            { std::chrono::year{ 2026 }, std::chrono::month{ 9 }, std::chrono::day{ 30 } }, 18, 0, 0));
+        tests.Expect(
+            october.utcInstant == AtBeijingTime(
+                { std::chrono::year{ 2026 }, std::chrono::month{ 10 }, std::chrono::day{ 8 } }, 9, 0, 0).UtcInstant(),
+            "October transition skips the entire managed holiday range");
+        tests.Expect(
+            liangwenpeak::time::FormatPeriodRange(october.nextRange)
+                == L"10 \u6708 8 \u65e5 09:00 - 12:00",
+            "long holiday transition formatter shows the actual date");
+
+        const PricingScheduleService fallback{ PricingCalendar{} };
+        tests.Expect(
+            fallback.GetPricingPeriod(AtBeijingTime(
+                { std::chrono::year{ 2028 }, std::chrono::month{ 10 }, std::chrono::day{ 2 } }, 9, 0, 0)) == PricingPeriod::Peak,
+            "unknown year conservatively uses weekday schedule");
+    }
+
+    void VerifyMenuPresentation(TestRunner& tests)
+    {
+        const auto off = liangwenpeak::ui::GetNotificationMenuPresentation(false);
+        tests.Expect(!off.checked && off.text == L"\u542f\u7528\u901a\u77e5" && off.glyph == L"\uE7ED",
+            "notification off presentation uses enable text and silent icon");
+        const auto on = liangwenpeak::ui::GetNotificationMenuPresentation(true);
+        tests.Expect(on.checked && on.text == L"\u5173\u95ed\u901a\u77e5" && on.glyph == L"\uEA8F",
+            "notification on presentation uses disable text and ringing icon");
+    }
+
+    void VerifyInstanceIdentity(TestRunner& tests)
+    {
+        using liangwenpeak::balance::BuildDataRootInstanceKey;
+        using liangwenpeak::balance::CanonicalizeDataRoot;
+        using liangwenpeak::balance::ResolveDataRoot;
+
+        const auto first = CanonicalizeDataRoot(L"C:\\App\\data");
+        const auto second = CanonicalizeDataRoot(L"c:/app/./data/");
+        tests.Expect(first == second, "data-root identity normalizes case slashes and dot segments");
+        tests.Expect(
+            BuildDataRootInstanceKey(first) == BuildDataRootInstanceKey(second),
+            "equivalent canonical data roots produce one logical instance key");
+        tests.Expect(
+            BuildDataRootInstanceKey(CanonicalizeDataRoot(L"C:\\Apps\\A\\data"))
+                != BuildDataRootInstanceKey(CanonicalizeDataRoot(L"C:\\Apps\\B\\data")),
+            "different data roots produce different logical instance keys");
+
+        const auto root = std::filesystem::path{ L"C:\\Portable\\LiangWenPeak" };
+        const auto oldData = CanonicalizeDataRoot(ResolveDataRoot(root / "app-1.1.2" / "LiangWenPeak.App.exe"));
+        const auto newData = CanonicalizeDataRoot(ResolveDataRoot(root / "app-1.1.3" / "LiangWenPeak.App.exe"));
+        tests.Expect(
+            BuildDataRootInstanceKey(oldData) == BuildDataRootInstanceKey(newData),
+            "app version directory is excluded from logical instance identity");
     }
 
     void VerifyUtcPlusEightConversion(TestRunner& tests)
@@ -389,6 +547,9 @@ int main()
     VerifyCountdownExamples(tests);
     VerifyNextTransitions(tests);
     VerifyTransitionMetadata(tests);
+    VerifyHolidayCalendar(tests);
+    VerifyMenuPresentation(tests);
+    VerifyInstanceIdentity(tests);
     VerifyUtcPlusEightConversion(tests);
     VerifyFormatting(tests);
     VerifyBalanceRefreshAlignment(tests);

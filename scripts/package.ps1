@@ -66,7 +66,8 @@ function Assert-PortableArchive {
         $requiredEntries = @(
             'LiangWenPeak.exe',
             'current.txt',
-            "app-$($Context.Version)/LiangWenPeak.App.exe"
+            "app-$($Context.Version)/LiangWenPeak.App.exe",
+            "app-$($Context.Version)/resources/pricing-calendar.json"
         )
         foreach ($requiredEntry in $requiredEntries) {
             if ($entryNames -notcontains $requiredEntry) {

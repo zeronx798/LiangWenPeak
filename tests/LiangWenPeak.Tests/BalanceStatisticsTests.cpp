@@ -299,10 +299,16 @@ namespace
 
         expect(FormatEta(EtaResult{ EtaState::Estimated, 59s }) == L"\u5c0f\u4e8e1\u5206\u949f", "ETA 59 seconds is less than one minute");
         expect(FormatEta(EtaResult{ EtaState::Estimated, 60s }) == L"\u7ea6 1 \u5206", "ETA 60 seconds is one minute");
-        expect(FormatEta(EtaResult{ EtaState::Estimated, 5min + 6s }) == L"\u7ea6 5 \u5206 6 \u79d2", "ETA uses two natural units");
-        expect(FormatEta(EtaResult{ EtaState::Estimated, 4h + 6s }) == L"\u7ea6 4 \u65f6 6 \u79d2", "ETA skips zero middle units");
+        expect(FormatEta(EtaResult{ EtaState::Estimated, 61s }) == L"\u7ea6 1 \u5206", "ETA 61 seconds floors to one minute");
+        expect(FormatEta(EtaResult{ EtaState::Estimated, 119s }) == L"\u7ea6 1 \u5206", "ETA 119 seconds floors to one minute");
+        expect(FormatEta(EtaResult{ EtaState::Estimated, 120s }) == L"\u7ea6 2 \u5206", "ETA 120 seconds is two minutes");
+        expect(FormatEta(EtaResult{ EtaState::Estimated, 5min + 6s }) == L"\u7ea6 5 \u5206", "ETA discards seconds after five minutes");
+        expect(FormatEta(EtaResult{ EtaState::Estimated, 5min + 59s }) == L"\u7ea6 5 \u5206", "ETA floors the final partial minute");
+        expect(FormatEta(EtaResult{ EtaState::Estimated, 4h + 29s }) == L"\u7ea6 4 \u65f6", "ETA does not promote seconds after four hours");
+        expect(FormatEta(EtaResult{ EtaState::Estimated, 5h + 29s }) == L"\u7ea6 5 \u65f6", "ETA does not promote seconds after five hours");
+        expect(FormatEta(EtaResult{ EtaState::Estimated, 4h + 5min + 6s }) == L"\u7ea6 4 \u65f6 5 \u5206", "ETA keeps at most two minute-level units");
         expect(
-            FormatEta(EtaResult{ EtaState::Estimated, std::chrono::hours{ 24 * 63 + 4 } })
+            FormatEta(EtaResult{ EtaState::Estimated, std::chrono::hours{ 24 * 63 + 4 } + 5min + 59s })
                 == L"\u7ea6 2 \u6708 3 \u5929",
             "ETA formats months and days");
         expect(

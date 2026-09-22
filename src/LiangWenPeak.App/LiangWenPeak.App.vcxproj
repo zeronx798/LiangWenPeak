@@ -114,6 +114,7 @@
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClInclude>
     <ClInclude Include="MainWindowLayout.h" />
+    <ClInclude Include="MenuPresentation.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="AppTheme\FluentThemeService.h" />
     <ClInclude Include="AppTheme\ThemeManager.h" />
@@ -123,6 +124,7 @@
     <ClInclude Include="Services\DeepSeekClient.h" />
     <ClInclude Include="Services\DeploymentPathService.h" />
     <ClInclude Include="Services\HistoryIdentityService.h" />
+    <ClInclude Include="Services\InstanceCoordinator.h" />
     <ClInclude Include="Services\NotificationIdentityService.h" />
     <ClInclude Include="Services\NotificationService.h" />
     <ClInclude Include="Services\SettingsService.h" />
@@ -150,6 +152,7 @@
     <ClCompile Include="Services\DeepSeekClient.cpp" />
     <ClCompile Include="Services\DeploymentPathService.cpp" />
     <ClCompile Include="Services\HistoryIdentityService.cpp" />
+    <ClCompile Include="Services\InstanceCoordinator.cpp" />
     <ClCompile Include="Services\NotificationIdentityService.cpp" />
     <ClCompile Include="Services\NotificationService.cpp" />
     <ClCompile Include="Services\SettingsService.cpp" />
@@ -164,6 +167,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+    <Content Include="..\..\resources\pricing-calendar.json">
+      <Link>resources\pricing-calendar.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\LiangWenPeak.Core\LiangWenPeak.Core.vcxproj">

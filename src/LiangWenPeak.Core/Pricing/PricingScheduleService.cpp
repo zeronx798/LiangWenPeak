@@ -22,47 +22,30 @@ namespace liangwenpeak::pricing
             return weekday == std::chrono::Saturday || weekday == std::chrono::Sunday;
         }
 
-        [[nodiscard]] PricingPeriod GetPeriod(
-            std::chrono::sys_days const date,
-            std::chrono::seconds const timeOfDay) noexcept
-        {
-            if (IsWeekend(std::chrono::weekday{ date }))
-            {
-                return PricingPeriod::Valley;
-            }
+    }
 
-            const bool morningPeak = timeOfDay >= 9h && timeOfDay < 12h;
-            const bool afternoonPeak = timeOfDay >= 14h && timeOfDay < 18h;
-            return morningPeak || afternoonPeak ? PricingPeriod::Peak : PricingPeriod::Valley;
+    PricingScheduleService::PricingScheduleService() noexcept
+        : m_calendar(PricingCalendar::LoadManaged())
+    {
+    }
+
+    PricingScheduleService::PricingScheduleService(PricingCalendar calendar) noexcept
+        : m_calendar(std::move(calendar))
+    {
+    }
+
+    PricingPeriod PricingScheduleService::GetPeriod(
+        std::chrono::sys_days const date,
+        std::chrono::seconds const timeOfDay) const noexcept
+    {
+        if (IsWeekend(std::chrono::weekday{ date }) || m_calendar.IsAllDayOffPeak(date))
+        {
+            return PricingPeriod::Valley;
         }
 
-        [[nodiscard]] TransitionPoint FindNextTransition(
-            std::chrono::sys_days const currentDate,
-            std::chrono::seconds const currentTimeOfDay) noexcept
-        {
-            for (int dayOffset = 0; dayOffset <= 7; ++dayOffset)
-            {
-                const auto candidateDate = currentDate + std::chrono::days{ dayOffset };
-                for (auto const boundary : PricingBoundaries)
-                {
-                    if (dayOffset == 0 && boundary <= currentTimeOfDay)
-                    {
-                        continue;
-                    }
-
-                    const auto periodBefore = GetPeriod(candidateDate, boundary - 1s);
-                    const auto periodAfter = GetPeriod(candidateDate, boundary);
-                    if (periodBefore != periodAfter)
-                    {
-                        return { candidateDate, boundary, periodAfter };
-                    }
-                }
-            }
-
-            // A weekday 09:00 boundary always exists within seven days.
-            const auto fallbackDate = currentDate + std::chrono::days{ 7 };
-            return { fallbackDate, 9h, PricingPeriod::Peak };
-        }
+        const bool morningPeak = timeOfDay >= 9h && timeOfDay < 12h;
+        const bool afternoonPeak = timeOfDay >= 14h && timeOfDay < 18h;
+        return morningPeak || afternoonPeak ? PricingPeriod::Peak : PricingPeriod::Valley;
     }
 
     PricingPeriod PricingScheduleService::GetPricingPeriod(time::BeijingTime const& beijingTime) const noexcept
@@ -74,8 +57,31 @@ namespace liangwenpeak::pricing
     {
         const auto currentDate = beijingTime.LocalDate();
         const auto currentLocalInstant = currentDate + beijingTime.TimeOfDay();
-        const auto next = FindNextTransition(currentDate, beijingTime.TimeOfDay());
-        const auto rangeEnd = FindNextTransition(next.date, next.timeOfDay);
+        const auto findNextTransition = [this](
+            std::chrono::sys_days const fromDate,
+            std::chrono::seconds const fromTimeOfDay) noexcept
+        {
+            for (std::chrono::days dayOffset{};; dayOffset += std::chrono::days{ 1 })
+            {
+                const auto candidateDate = fromDate + dayOffset;
+                for (auto const boundary : PricingBoundaries)
+                {
+                    if (dayOffset == std::chrono::days::zero() && boundary <= fromTimeOfDay)
+                    {
+                        continue;
+                    }
+
+                    const auto periodBefore = GetPeriod(candidateDate, boundary - 1s);
+                    const auto periodAfter = GetPeriod(candidateDate, boundary);
+                    if (periodBefore != periodAfter)
+                    {
+                        return TransitionPoint{ candidateDate, boundary, periodAfter };
+                    }
+                }
+            }
+        };
+        const auto next = findNextTransition(currentDate, beijingTime.TimeOfDay());
+        const auto rangeEnd = findNextTransition(next.date, next.timeOfDay);
         const auto nextLocalInstant = next.date + next.timeOfDay;
 
         return {
@@ -88,6 +94,8 @@ namespace liangwenpeak::pricing
                 rangeEnd.date - currentDate,
                 std::chrono::weekday{ next.date },
                 std::chrono::weekday{ rangeEnd.date },
+                std::chrono::year_month_day{ next.date },
+                std::chrono::year_month_day{ rangeEnd.date },
             },
         };
     }

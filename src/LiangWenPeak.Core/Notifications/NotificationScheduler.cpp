@@ -2,9 +2,16 @@
 
 #include "../Time/BeijingTime.h"
 
+#include <utility>
+
 namespace liangwenpeak::notifications
 {
     using namespace std::chrono_literals;
+
+    NotificationScheduler::NotificationScheduler(pricing::PricingCalendar calendar) noexcept
+        : m_pricingSchedule(std::move(calendar))
+    {
+    }
 
     bool NotificationDeliveryState::WasDelivered(NotificationEvent const& event) const noexcept
     {

@@ -61,6 +61,14 @@ Windows 10 不创建可见入口：菜单项保持 `Collapsed`，不是 disabled
 
 Launcher 正确引用包含空格的 executable path，启动成功后立即关闭 process/thread handles 并退出，不等待 App 结束。它严格服从 `current.txt`，不选择其它版本，也不实现自动更新、fallback 或 rollback。
 
+### 基于 data root 的逻辑单例
+
+App 在 `OnLaunched` 中、创建 `MainWindow`、构造 `MainViewModel`、加载或修复历史及启动任何 scheduler 之前注册逻辑实例。Windows App SDK `AppInstance` 的自定义 key 在 unpackaged 跨 executable path 场景仍受 executable identity 限制，不能覆盖 `app-1.1.2` 与 `app-1.1.3` 同时指向一个 data root 的升级边界；因此实现使用 keyed Win32 named mutex 作为唯一所有权，并以 named shared memory、manual-reset ready event 和 registered window message 构成无落盘 activation IPC。identity 由稳定 product namespace 与 canonical absolute data root 共同派生；data root 会解析相对路径与 `.` / `..`，统一分隔符和 Windows 大小写，并由 `weakly_canonical` 在已有路径范围内解析 symlink、junction 与其它 reparse target。版本化 `app-<version>/LiangWenPeak.App.exe` 路径不进入 identity，因此升级前后的 App 只要指向同一个 `<root>/data/`，就属于同一逻辑实例。
+
+Primary 在窗口可接收 registered message 后把 PID 与 HWND 写入 shared memory 并 signal ready event。Secondary process 在任何用户数据副作用前等待这一就绪边界、校验 HWND 仍属于该 PID、使用 `AllowSetForegroundWindow` 把用户启动产生的 foreground 权限转交给 primary、发送 activation message 后立即退出。primary 恢复最小化窗口，并组合 `ShowWindow`、`SetWindowPos(HWND_TOP)`、`BringWindowToTop`、`SetForegroundWindow` 与 `SetFocus` 做一次前台激活。该路径不修改 `OverlappedPresenter::IsAlwaysOnTop` 或注册表偏好。owned settings window 已打开时，激活现有 settings window，而不是新建窗口或把 MainWindow 盖到它上面。
+
+这个边界保护 `data/balance-history.csv`：secondary 不会创建 history writer、加载并修复 CSV、追加 marker 或发起 API sample。不同 canonical data root 生成不同 key，因此不同 portable 副本可以并行运行；这不是 machine-global singleton。Launcher 仍只负责读取 `current.txt` 并启动当前 App，不参与实例协调。
+
 ## 4. Portable 部署结构
 
 ```text
@@ -72,12 +80,15 @@ LiangWenPeak/
 │  └─ history/
 └─ app-<version>/
    ├─ LiangWenPeak.App.exe
+   ├─ resources/
+   │  └─ pricing-calendar.json
    └─ ...
 ```
 
 - `LiangWenPeak.exe` 是稳定的用户入口和 Launcher。
 - `current.txt` 只保存当前活动版本，Launcher 据此定位 payload。
 - `app-<version>/` 保存可替换的版本化 WinUI 应用、Windows App SDK runtime 和资源。
+- `resources/pricing-calendar.json` 是随版本 payload 发布的受管定价日历，不属于用户数据。
 - `data/` 与 Launcher 同级，是应用按需创建的 portable 本地用户数据目录。
 - Windows Credential Locker 属于当前 Windows 用户配置，不在 portable filesystem 中。
 
@@ -85,7 +96,7 @@ Release ZIP 不创建或携带用户 `data/`。Packaging 只从允许的 build o
 
 在正式 portable layout 中，App 从自身 `app-<version>/` 目录向上解析 deployment root，再使用根目录下的 `data/`。开发构建则通过仓库中的 `Version.props` 定位 repository root；测试可以显式注入隔离 data root。
 
-Unpackaged WinUI 资源也必须随同版本化 payload 完整 staging。项目输出与可执行文件资源映射名一致的 `LiangWenPeak.App.pri`，并在 `App.xaml` 的应用级资源中合并官方 `XamlControlsResources`；两者共同保证 `NumberBox` 等原生 WinUI 控件在 build output、staged portable 目录及最终 ZIP 解压目录中都能解析默认样式和本地化字符串。Packaging 会把该 PRI 视为必需文件并拒绝旧的 `LiangWenPeak.pri` 名称，避免开发目录可用而 portable 启动时在控件套用模板阶段 fail-fast。
+Unpackaged WinUI 资源也必须随同版本化 payload 完整 staging。项目输出与可执行文件资源映射名一致的 `LiangWenPeak.App.pri`，并在 `App.xaml` 的应用级资源中合并官方 `XamlControlsResources`；两者共同保证 `NumberBox` 等原生 WinUI 控件在 build output、staged portable 目录及最终 ZIP 解压目录中都能解析默认样式和本地化字符串。Packaging 会把该 PRI 与 `resources/pricing-calendar.json` 视为必需文件并拒绝旧的 `LiangWenPeak.pri` 名称，避免开发目录可用而 portable 启动时在控件套用模板阶段 fail-fast。
 
 Toast 不改变这一发布结构。实际发送进程是 Launcher 启动的 unpackaged `LiangWenPeak.App.exe`，但 shell identity 的快捷方式 Target 固定为 portable 根目录的 `LiangWenPeak.exe`，而不是版本化 payload。Production AUMID 固定为 `zeronx798.LiangWenPeak`，与版本号和 portable 路径无关；进程在创建 UI 前调用 `SetCurrentProcessExplicitAppUserModelID` 设置同一身份。
 
@@ -103,9 +114,15 @@ Toast 不改变这一发布结构。实际发送进程是 Launcher 启动的 unp
 - `14:00–18:00` 为 Peak / 原价。
 - 其它时间为 Valley / 半价。
 
-周六和周日全天为 Valley / 半价。周末的 `09:00`、`12:00`、`14:00`、`18:00` 不构成价格 transition。
+周六和周日全天为 Valley / 半价。周末的 `09:00`、`12:00`、`14:00`、`18:00` 不构成价格 transition。调休上班的自然周末仍然执行这条规则，系统不引入中国实际工作日或补班日模型。
 
-`PricingScheduleService` 同时负责当前 period、下一次真实 transition 和剩余时间。它检查候选边界前后的状态，跳过不改变价格的边界，因此周五 `18:00` 进入 Valley 后可以直接找到周一 `09:00` 的下一次 Peak。下一时段 formatter 会在跨日或跨周末时补充必要的星期信息。
+Core 中独立的 `PricingCalendar` 负责读取 managed `resources/pricing-calendar.json`，并提供 `IsAllDayOffPeak(date)` 与 `HasCalendarData(year)`。schema version 1 固定声明 `Asia/Shanghai`，按年份保存人工维护、闭区间的 `all_day_off_peak` 日期范围；它只表达全天闲时 override，不保存调休工作日或完整工作日历。1.1.3 payload 包含 2026 年元旦、春节、清明、劳动节、端午、中秋和国庆范围。
+
+Production 从当前 `LiangWenPeak.App.exe` 同级的 `resources/pricing-calendar.json` 加载；tests 通过内存 JSON 或临时 fixture 注入。文件缺失、JSON 损坏、schema 不支持或当前年份没有数据都不会阻止启动：周末仍全天 Valley，普通周一至周五回退到原有两个 Peak 区间，未知年份不猜测节假日。
+
+`PricingScheduleService` 使用 weekly schedule 加 holiday all-day override 计算当前 period、下一次真实 transition 和剩余时间。判断顺序是自然周末、managed holiday、普通工作日区间。服务逐日扫描候选 Peak 边界并比较边界前后真实状态，全天闲时日期直接跳过，不制造伪 transition；例如 2026-09-24 `18:00` 的下一次 Peak 是 09-28 `09:00`，2026-09-30 `18:00` 的下一次 Peak 是 10-08 `09:00`。通知 scheduler 继续只依赖这个统一结果，因此假期内部没有独立复制的 holiday 判断或伪通知。
+
+下一时段 formatter 对当天范围保留紧凑时间；任何非当天 endpoint 使用 `M 月 D 日 HH:mm`，因此跨周末或连续节假日后显示明确实际日期，不再受“周几”表达能力限制。
 
 倒计时使用总小时数格式化，小时字段不会在 24 小时后回绕，所以跨周末 duration 可以显示超过 24 小时。
 
@@ -147,7 +164,7 @@ API Key 使用 Windows Credential Locker 保存，Credential resource 为 `Liang
 
 设置窗口不回显已保存 Key。已配置时 PasswordBox 保持空白并显示占位说明；空白保存代表保留原 Key。清除是 DraftState 中的 pending action，只有保存设置后才真正调用 Credential Locker 删除；取消或撤销不会影响已保存凭据。
 
-非敏感设置保存在当前用户注册表 `HKCU\Software\LiangWenPeak`，包括通知总开关、提前提醒开关与分钟数，以及 API 功能状态、预测状态、显示币种、刷新周期、速率窗口、preferred algorithm、各币种预警和已知币种列表。通知去重时间戳也保存在该注册表路径，但不属于用户可编辑 Draft。
+非敏感设置保存在当前用户注册表 `HKCU\Software\LiangWenPeak`，包括始终置顶、通知总开关、提前提醒开关与分钟数，以及 API 功能状态、预测状态、显示币种、刷新周期、速率窗口、preferred algorithm、各币种预警和已知币种列表。主菜单的始终置顶、通知和余额预测属于立即动作，会立即应用并持久化；设置窗口 Draft 的 Save/Cancel 语义不变。通知菜单的 checked state、铃铛 glyph 与启用/关闭文案统一从已持久化的真实通知状态刷新。通知去重时间戳也保存在该注册表路径，但不属于用户可编辑 Draft。
 
 ## 8. Balance Observation 与 Scheduled Sample
 
@@ -284,11 +301,11 @@ ETA 使用当前所选币种的最新 Observation、该币种预警余额和 for
 4. $\mathrm{ETA} < 60\,\mathrm{s}$ ：显示“小于1分钟”。
 5. $\mathrm{ETA} \ge 365\,\mathrm{days}$ ：显示“大于1年”。
 
-普通 ETA 只保留最高两个非零自然单位，1 月按 30 天定义。例如：
+普通 ETA 在拆分自然单位前先按 $s_{\mathrm{display}} = \left\lfloor s_{\mathrm{ETA}} / 60 \right\rfloor \times 60$ 向下舍弃不足一分钟的 remainder。内部 ETA 仍保留秒级精度，UI 只使用月、天、时、分，并最多保留最高两个非零单位；1 月按 30 天定义。例如：
 
-- `2mo 3d 4h 5min 6s` 格式化为“约 2 月 3 天”。
-- `4h 0min 6s` 格式化为“约 4 时 6 秒”。
-- `5min 6s` 格式化为“约 5 分 6 秒”。
+- `2mo 3d 4h 5min 59s` 格式化为“约 2 月 3 天”。
+- `4h 0min 29s` 格式化为“约 4 时”。
+- `5min 59s` 格式化为“约 5 分”。
 
 ## 16. API 功能状态模型
 
@@ -381,12 +398,13 @@ Package validation 在压缩前后都拒绝 `data/` 和禁止产物。发布到 
 Native C++ tests 覆盖：
 
 - 北京时间、工作日峰谷边界、完整周末、Friday-to-Monday transition 和超过 24 小时 countdown
+- managed calendar schema/fallback、法定节假日、调休周末、跨周末/跨月/跨年范围与 holiday transition
 - 下一时段 metadata、格式化和自动刷新整分钟 alignment
 - 固定精度 DecimalAmount、CNG secret 和 HMAC Series ID
 - Scheduled Sample 与 Observation 分离、多币种 batch 和计划时间戳
 - Series boundary、充值、API OFF/ON marker、zero consumption 和 long gap interval
 - 滑动平均、窗口边界线性裁剪、EWMA half-life、Huber robust trend 和非负 clamp
-- 多币种独立速率/ETA、ETA 状态优先级与自然单位格式化
+- 多币种独立速率/ETA、ETA 状态优先级、整分钟向下舍入与自然单位格式化
 - DraftState、Key clear/undo/replace、window constraint 和 preferred/effective algorithm
 - 通知默认值、`1–30` 整数约束、Snapshot/Cancel/Save/Last Commit Wins 事务
 - Advance/Arrived、Timer 重入去重、周末、Friday-to-Monday、missed Advance 与 15 分钟 Arrived catch-up
@@ -397,10 +415,11 @@ Native C++ tests 覆盖：
 PowerShell tests 覆盖：
 
 - Launcher 正常启动、空格路径、任意 working directory、版本校验和错误场景
+- canonical data-root 单例、同 root 跨版本 redirect、不同 root 并行、最小化恢复、前台与 owned settings activation
 - source version 冲突、缺失构建环境、测试失败阻断、禁止 package 内容和 ZIP layout
 - 本地 `data/` sentinel 在 clean/publish 后保持不变，且不泄漏到 ZIP
 - staged Launcher smoke test 和 portable payload 验证
-- 主菜单通知快捷开关的即时持久化
+- 主菜单始终置顶与通知快捷开关的即时持久化、重启恢复及通知文案状态
 - danger cleanup Cancel、精确 Registry/Credential/shortcut 清理、unrelated shortcut 保留、notification history（系统支持时）、完整 Draft defaults 重建及 Save non-resurrection
 - isolated `data/balance-history.csv`、`data/history/test.csv` 与 sentinel 的逐文件 SHA-256 保留验证
 - Release-equivalent staged Launcher 的 classic Toast title/body、portable 目录移动后 shortcut Target repair 与 test-only teardown

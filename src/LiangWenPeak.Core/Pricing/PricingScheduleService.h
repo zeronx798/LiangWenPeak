@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PricingCalendar.h"
 #include "../Time/BeijingTime.h"
 
 #include <chrono>
@@ -20,6 +21,8 @@ namespace liangwenpeak::pricing
         std::chrono::days endDayOffset;
         std::chrono::weekday startWeekday;
         std::chrono::weekday endWeekday;
+        std::chrono::year_month_day startDate;
+        std::chrono::year_month_day endDate;
     };
 
     struct PricingTransition
@@ -39,9 +42,19 @@ namespace liangwenpeak::pricing
     class PricingScheduleService final
     {
     public:
+        PricingScheduleService() noexcept;
+        explicit PricingScheduleService(PricingCalendar calendar) noexcept;
+
         [[nodiscard]] PricingPeriod GetPricingPeriod(time::BeijingTime const& beijingTime) const noexcept;
         [[nodiscard]] PricingTransition GetNextTransition(time::BeijingTime const& beijingTime) const noexcept;
         [[nodiscard]] std::chrono::seconds GetRemainingTime(time::BeijingTime const& beijingTime) const noexcept;
         [[nodiscard]] PricingSnapshot GetSnapshot(time::BeijingTime const& beijingTime) const noexcept;
+
+    private:
+        [[nodiscard]] PricingPeriod GetPeriod(
+            std::chrono::sys_days date,
+            std::chrono::seconds timeOfDay) const noexcept;
+
+        PricingCalendar m_calendar;
     };
 }

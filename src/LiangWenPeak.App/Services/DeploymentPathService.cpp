@@ -67,4 +67,9 @@ namespace liangwenpeak::services
     {
         return balance::ResolveDataRoot(ExecutablePath(), m_dataRootOverride);
     }
+
+    std::filesystem::path DeploymentPathService::CanonicalDataRoot() const
+    {
+        return balance::CanonicalizeDataRoot(DataRoot());
+    }
 }

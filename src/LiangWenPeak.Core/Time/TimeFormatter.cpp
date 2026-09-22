@@ -22,27 +22,47 @@ namespace liangwenpeak::time
             return output.str();
         }
 
+        std::wstring FormatDate(std::chrono::year_month_day const date)
+        {
+            return std::to_wstring(static_cast<unsigned>(date.month())) + L" \u6708 "
+                + std::to_wstring(static_cast<unsigned>(date.day())) + L" \u65e5";
+        }
+
         std::wstring FormatWeekday(std::chrono::weekday const weekday)
         {
-            switch (weekday.c_encoding())
+            return weekday == std::chrono::Monday ? L"\u5468\u4e00" : L"";
+        }
+
+        bool IsOrdinaryWeekendRange(pricing::PeriodRange const& range) noexcept
+        {
+            return std::chrono::sys_days{ range.endDate } - std::chrono::sys_days{ range.startDate }
+                    == std::chrono::days{ 3 }
+                && range.startWeekday == std::chrono::Friday
+                && range.endWeekday == std::chrono::Monday;
+        }
+
+        bool IsOrdinaryStartDelay(pricing::PeriodRange const& range) noexcept
+        {
+            if (range.startDayOffset == std::chrono::days::zero())
             {
-            case 0:
-                return L"\u5468\u65e5";
-            case 1:
-                return L"\u5468\u4e00";
-            case 2:
-                return L"\u5468\u4e8c";
-            case 3:
-                return L"\u5468\u4e09";
-            case 4:
-                return L"\u5468\u56db";
-            case 5:
-                return L"\u5468\u4e94";
-            case 6:
-                return L"\u5468\u516d";
-            default:
-                return {};
+                return true;
             }
+
+            const auto currentDate = std::chrono::sys_days{ range.startDate } - range.startDayOffset;
+            const auto currentWeekday = std::chrono::weekday{ currentDate };
+            if (range.startDayOffset == std::chrono::days{ 1 })
+            {
+                return currentWeekday != std::chrono::Friday
+                    && currentWeekday != std::chrono::Saturday;
+            }
+            if (range.startDayOffset == std::chrono::days{ 2 })
+            {
+                return currentWeekday == std::chrono::Saturday
+                    && range.startWeekday == std::chrono::Monday;
+            }
+            return range.startDayOffset == std::chrono::days{ 3 }
+                && currentWeekday == std::chrono::Friday
+                && range.startWeekday == std::chrono::Monday;
         }
     }
 
@@ -76,24 +96,38 @@ namespace liangwenpeak::time
 
     std::wstring FormatPeriodRange(pricing::PeriodRange const& range)
     {
-        const bool showStartWeekday = range.startDayOffset > std::chrono::days{ 1 }
-            || (range.startDayOffset == std::chrono::days{ 1 }
-                && range.startWeekday == std::chrono::Monday);
-        const bool showEndWeekday = range.endDayOffset - range.startDayOffset > std::chrono::days{ 1 };
+        const auto rangeDaySpan = std::chrono::sys_days{ range.endDate }
+            - std::chrono::sys_days{ range.startDate };
+        const bool ordinaryWeekendRange = IsOrdinaryWeekendRange(range);
+        const bool showEndDate = rangeDaySpan > std::chrono::days{ 1 } && !ordinaryWeekendRange;
+        const bool showEndWeekday = ordinaryWeekendRange;
+        const bool showStartDate = !IsOrdinaryStartDelay(range);
+        const bool showStartWeekday = !showStartDate
+            && (range.startDayOffset > std::chrono::days{ 1 }
+                || (range.startDayOffset == std::chrono::days{ 1 }
+                    && range.startWeekday == std::chrono::Monday));
 
         auto start = FormatHourMinute(range.start);
-        if (showStartWeekday)
+        if (showStartDate)
+        {
+            start = FormatDate(range.startDate) + L" " + start;
+        }
+        else if (showStartWeekday)
         {
             start = FormatWeekday(range.startWeekday) + L" " + start;
         }
 
         auto end = FormatHourMinute(range.end);
-        if (showEndWeekday)
+        if (showEndDate)
+        {
+            end = FormatDate(range.endDate) + L" " + end;
+        }
+        else if (showEndWeekday)
         {
             end = FormatWeekday(range.endWeekday) + L" " + end;
         }
 
-        return start + L" \u2014 " + end;
+        return start + L" - " + end;
     }
 
     std::wstring FormatCnyBalance(double const balance)

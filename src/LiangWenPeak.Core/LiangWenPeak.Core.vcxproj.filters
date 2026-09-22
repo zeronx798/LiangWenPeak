@@ -25,6 +25,7 @@
     <ClInclude Include="Balance\SeriesIdentity.h"><Filter>Balance</Filter></ClInclude>
     <ClInclude Include="Notifications\NotificationScheduler.h"><Filter>Notifications</Filter></ClInclude>
     <ClInclude Include="Notifications\NotificationSettings.h"><Filter>Notifications</Filter></ClInclude>
+    <ClInclude Include="Pricing\PricingCalendar.h"><Filter>Pricing</Filter></ClInclude>
     <ClInclude Include="Pricing\PricingScheduleService.h">
       <Filter>Pricing</Filter>
     </ClInclude>
@@ -49,6 +50,7 @@
     <ClCompile Include="Balance\SeriesIdentity.cpp"><Filter>Balance</Filter></ClCompile>
     <ClCompile Include="Notifications\NotificationScheduler.cpp"><Filter>Notifications</Filter></ClCompile>
     <ClCompile Include="Notifications\NotificationSettings.cpp"><Filter>Notifications</Filter></ClCompile>
+    <ClCompile Include="Pricing\PricingCalendar.cpp"><Filter>Pricing</Filter></ClCompile>
     <ClCompile Include="Pricing\PricingScheduleService.cpp">
       <Filter>Pricing</Filter>
     </ClCompile>

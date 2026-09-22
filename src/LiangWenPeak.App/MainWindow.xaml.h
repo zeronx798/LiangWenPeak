@@ -24,6 +24,8 @@ namespace winrt::LiangWenPeak::implementation
     {
         MainWindow();
         explicit MainWindow(liangwenpeak::services::StateProfile profile);
+        void ActivateFromSecondaryLaunch() noexcept;
+        [[nodiscard]] HWND WindowHandle() const noexcept;
 
         void OnRootLoaded(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnClockTick(Windows::Foundation::IInspectable const& sender, Windows::Foundation::IInspectable const& args);
@@ -74,6 +76,13 @@ namespace winrt::LiangWenPeak::implementation
             Windows::Foundation::IInspectable const& sender,
             Microsoft::UI::Xaml::Media::RenderedEventArgs const& args);
         void OnWindowClosing(Microsoft::UI::Windowing::AppWindow const& sender, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& args);
+        static LRESULT CALLBACK ActivationSubclassProc(
+            HWND windowHandle,
+            UINT message,
+            WPARAM wParam,
+            LPARAM lParam,
+            UINT_PTR subclassId,
+            DWORD_PTR referenceData);
 
         liangwenpeak::services::StateProfile m_stateProfile;
         liangwenpeak::services::DeploymentPathService m_deploymentPaths;
@@ -108,6 +117,7 @@ namespace winrt::LiangWenPeak::implementation
         bool m_firstFrameWatchActive = false;
         bool m_startupCloaked = false;
         bool m_suspendStatusHandlerAttached = false;
+        bool m_activationSubclassAttached = false;
     };
 }
 
