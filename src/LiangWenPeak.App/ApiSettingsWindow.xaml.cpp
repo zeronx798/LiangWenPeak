@@ -254,6 +254,14 @@ namespace winrt::LiangWenPeak::implementation
         m_draft->Settings().preferredAlgorithm = AlgorithmAt(AlgorithmBox().SelectedIndex());
     }
 
+    void ApiSettingsWindow::OnStartupEnabledChanged(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (m_suppressEvents || !m_draft) return;
+        const bool enabled = StartupEnabledBox().IsChecked().Value();
+        m_draft->Settings().startupEnabled = enabled;
+        StartupHiddenBox().IsEnabled(enabled);
+    }
+
     void ApiSettingsWindow::OnNotificationEnabledToggled(IInspectable const&, RoutedEventArgs const&)
     {
         if (m_suppressEvents || !m_draft)
@@ -288,12 +296,17 @@ namespace winrt::LiangWenPeak::implementation
             return;
         }
         m_draft->Settings().apiFeatureEnabled = ApiFeatureToggle().IsOn();
+        m_draft->Settings().startupEnabled = StartupEnabledBox().IsChecked().Value();
+        m_draft->Settings().startupHidden = StartupHiddenBox().IsChecked().Value();
+        m_draft->Settings().minimizeBehavior = MinimizeBehaviorBox().SelectedIndex() == 1
+            ? liangwenpeak::balance::MinimizeBehavior::Tray
+            : liangwenpeak::balance::MinimizeBehavior::Window;
         m_draft->Settings().forecastEnabled = ForecastEnabledBox().IsOn();
         m_draft->Settings().selectedCurrency = SelectedCurrency();
         if (!m_saveCallback
             || !m_saveCallback(m_draft->Settings(), m_draft->KeyAction(), ApiKeyBox().Password()))
         {
-            SettingsStatusText().Text(L"\u8bbe\u7f6e\u4fdd\u5b58\u5931\u8d25");
+            SettingsStatusText().Text(L"设置保存失败，请检查开机自启注册及设置存储权限。");
             return;
         }
         Close();
@@ -446,6 +459,11 @@ namespace winrt::LiangWenPeak::implementation
         }
         m_suppressEvents = true;
         ApiFeatureToggle().IsOn(m_draft->Settings().apiFeatureEnabled);
+        StartupEnabledBox().IsChecked(m_draft->Settings().startupEnabled);
+        StartupHiddenBox().IsChecked(m_draft->Settings().startupHidden);
+        StartupHiddenBox().IsEnabled(m_draft->Settings().startupEnabled);
+        MinimizeBehaviorBox().SelectedIndex(
+            m_draft->Settings().minimizeBehavior == liangwenpeak::balance::MinimizeBehavior::Tray ? 1 : 0);
         ForecastEnabledBox().IsOn(m_draft->Settings().forecastEnabled);
         NotificationEnabledToggle().IsOn(m_draft->Settings().notifications.enabled);
         AdvanceReminderToggle().IsOn(m_draft->Settings().notifications.advanceEnabled);

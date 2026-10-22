@@ -12,6 +12,7 @@
 #include "Services/NotificationService.h"
 #include "Services/SettingsService.h"
 #include "Services/StateProfile.h"
+#include "Services/TrayService.h"
 #include "ViewModels/MainViewModel.h"
 
 #include <chrono>
@@ -23,7 +24,7 @@ namespace winrt::LiangWenPeak::implementation
     struct MainWindow : MainWindowT<MainWindow>
     {
         MainWindow();
-        explicit MainWindow(liangwenpeak::services::StateProfile profile);
+        explicit MainWindow(liangwenpeak::services::StateProfile profile, bool startupLaunch = false);
         void ActivateFromSecondaryLaunch() noexcept;
         [[nodiscard]] HWND WindowHandle() const noexcept;
 
@@ -43,9 +44,14 @@ namespace winrt::LiangWenPeak::implementation
         void OnAboutClick(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnExitClick(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnCloseClick(Windows::Foundation::IInspectable const& sender, Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnMinimizeClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnMinimizeWindowClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnMinimizeToTrayClick(Windows::Foundation::IInspectable const&, Microsoft::UI::Xaml::RoutedEventArgs const&);
 
     private:
         void ConfigureWindow();
+        void Minimize(bool toTray) noexcept;
+        void ShowTrayMenu() noexcept;
         void ApplyTheme();
         void ApplyWindowPresentation();
         void ArmFirstFrameReveal();
@@ -85,6 +91,7 @@ namespace winrt::LiangWenPeak::implementation
             DWORD_PTR referenceData);
 
         liangwenpeak::services::StateProfile m_stateProfile;
+        liangwenpeak::services::TrayService m_trayService;
         liangwenpeak::services::DeploymentPathService m_deploymentPaths;
         std::shared_ptr<liangwenpeak::services::CredentialService> m_credentialService;
         std::shared_ptr<liangwenpeak::services::SettingsService> m_settingsService;
@@ -118,6 +125,8 @@ namespace winrt::LiangWenPeak::implementation
         bool m_startupCloaked = false;
         bool m_suspendStatusHandlerAttached = false;
         bool m_activationSubclassAttached = false;
+        bool m_silentStartup = false;
+        UINT m_taskbarCreatedMessage = 0;
     };
 }
 

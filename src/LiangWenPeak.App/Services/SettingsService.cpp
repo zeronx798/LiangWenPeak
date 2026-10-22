@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "SettingsService.h"
+#include "DeploymentPathService.h"
 
 #include <charconv>
 #include <limits>
@@ -267,7 +268,7 @@ namespace liangwenpeak::services
     }
 
     SettingsService::SettingsService(StateProfile const& profile)
-        : m_settingsPath(profile.RegistrySubkey())
+        : m_settingsPath(profile.RegistrySubkey()), m_profile(profile)
     {
     }
 
@@ -276,6 +277,19 @@ namespace liangwenpeak::services
         balance::BalanceSettings settings;
         try
         {
+            if (const auto value = ReadDword(m_settingsPath, L"StartupEnabled"))
+            {
+                settings.startupEnabled = *value != 0;
+            }
+            if (const auto value = ReadDword(m_settingsPath, L"StartupHidden"))
+            {
+                settings.startupHidden = *value != 0;
+            }
+            if (const auto value = ReadDword(m_settingsPath, L"MinimizeBehavior"))
+            {
+                settings.minimizeBehavior = *value == 1
+                    ? balance::MinimizeBehavior::Tray : balance::MinimizeBehavior::Window;
+            }
             if (const auto value = ReadDword(m_settingsPath, ApiFeatureEnabledName))
             {
                 settings.apiFeatureEnabled = *value != 0;
@@ -335,6 +349,13 @@ namespace liangwenpeak::services
         {
             auto settings = source;
             balance::NormalizeBalanceSettings(settings);
+            // Apply the external registration before committing its enabled flag.
+            // A failure leaves the saved configuration untouched.
+            const auto previous = LoadBalanceSettings();
+            if (!SynchronizeStartup(settings.startupEnabled))
+            {
+                return false;
+            }
             HKEY key{};
             if (::RegCreateKeyExW(
                 HKEY_CURRENT_USER,
@@ -347,10 +368,14 @@ namespace liangwenpeak::services
                 &key,
                 nullptr) != ERROR_SUCCESS)
             {
+                static_cast<void>(SynchronizeStartup(previous.startupEnabled));
                 return false;
             }
 
-            const bool saved = WriteDword(key, ApiFeatureEnabledName, settings.apiFeatureEnabled ? 1U : 0U)
+            const bool saved = WriteDword(key, L"StartupEnabled", settings.startupEnabled ? 1U : 0U)
+                && WriteDword(key, L"StartupHidden", settings.startupHidden ? 1U : 0U)
+                && WriteDword(key, L"MinimizeBehavior", static_cast<DWORD>(settings.minimizeBehavior))
+                && WriteDword(key, ApiFeatureEnabledName, settings.apiFeatureEnabled ? 1U : 0U)
                 && WriteDword(key, ForecastEnabledName, settings.forecastEnabled ? 1U : 0U)
                 && WriteString(key, SelectedCurrencyName, winrt::to_hstring(settings.selectedCurrency).c_str())
                 && WriteDword(key, BalanceRefreshIntervalName, static_cast<DWORD>(settings.refreshInterval.count()))
@@ -368,6 +393,16 @@ namespace liangwenpeak::services
                     NotificationAdvanceMinutesName,
                     static_cast<DWORD>(settings.notifications.advanceMinutes.count()));
             ::RegCloseKey(key);
+            if (!saved)
+            {
+                static_cast<void>(SynchronizeStartup(previous.startupEnabled));
+                static_cast<void>(WriteDwordSetting(
+                    m_settingsPath, L"StartupEnabled", previous.startupEnabled ? 1U : 0U));
+                static_cast<void>(WriteDwordSetting(
+                    m_settingsPath, L"StartupHidden", previous.startupHidden ? 1U : 0U));
+                static_cast<void>(WriteDwordSetting(
+                    m_settingsPath, L"MinimizeBehavior", static_cast<DWORD>(previous.minimizeBehavior)));
+            }
             return saved;
         }
         catch (...)
@@ -486,10 +521,57 @@ namespace liangwenpeak::services
 
     bool SettingsService::DeleteAllSettings() const noexcept
     {
+        const bool startupRemoved = SynchronizeStartup(false);
+        if (!startupRemoved) return false;
         const auto result = ::RegDeleteTreeW(HKEY_CURRENT_USER, m_settingsPath.c_str());
-        return result == ERROR_SUCCESS
+        return startupRemoved && (result == ERROR_SUCCESS
             || result == ERROR_FILE_NOT_FOUND
-            || result == ERROR_PATH_NOT_FOUND;
+            || result == ERROR_PATH_NOT_FOUND);
+    }
+
+    bool SettingsService::SynchronizeStartup(bool const enabled) const noexcept
+    {
+        try
+        {
+            // Integration tests never touch the real Windows login Run key.
+            const auto path = m_profile.IsTest()
+                ? m_settingsPath + L"\\StartupRun"
+                : std::wstring{ L"Software\\Microsoft\\Windows\\CurrentVersion\\Run" };
+            const auto name = m_profile.IsTest()
+                ? L"LiangWenPeak.Test." + m_profile.TestRunId()
+                : std::wstring{ L"LiangWenPeak" };
+            if (!enabled)
+            {
+                HKEY key{};
+                const auto opened = ::RegOpenKeyExW(
+                    HKEY_CURRENT_USER, path.c_str(), 0, KEY_SET_VALUE, &key);
+                if (opened == ERROR_FILE_NOT_FOUND || opened == ERROR_PATH_NOT_FOUND)
+                {
+                    return true;
+                }
+                if (opened != ERROR_SUCCESS) return false;
+                const auto removed = ::RegDeleteValueW(key, name.c_str());
+                ::RegCloseKey(key);
+                return removed == ERROR_SUCCESS || removed == ERROR_FILE_NOT_FOUND;
+            }
+            const auto launcher = DeploymentPathService{ m_profile }.LauncherPath();
+            if (!std::filesystem::is_regular_file(launcher)) return false;
+            const auto command = L"\"" + launcher.wstring() + L"\" --startup";
+            if (command.size() > 260) return false;
+            HKEY key{};
+            if (::RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr,
+                    REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+            {
+                return false;
+            }
+            const bool written = WriteString(key, name.c_str(), command);
+            ::RegCloseKey(key);
+            return written;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     std::wstring const& SettingsService::RegistrySubkey() const noexcept

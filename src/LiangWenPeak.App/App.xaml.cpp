@@ -18,8 +18,14 @@ namespace winrt::LiangWenPeak::implementation
         InitializeComponent();
     }
 
-    void App::OnLaunched(Microsoft::UI::Xaml::LaunchActivatedEventArgs const&)
+    void App::OnLaunched(Microsoft::UI::Xaml::LaunchActivatedEventArgs const& args)
     {
+        static_cast<void>(args);
+        int argumentCount{};
+        const auto arguments = ::CommandLineToArgvW(::GetCommandLineW(), &argumentCount);
+        const bool startupLaunch = arguments && argumentCount == 2
+            && std::wstring_view{ arguments[1] } == L"--startup";
+        if (arguments) ::LocalFree(arguments);
         const liangwenpeak::services::DeploymentPathService deploymentPaths{ m_stateProfile };
         if (!m_instanceCoordinator.TryAcquire(deploymentPaths.CanonicalDataRoot()))
         {
@@ -27,7 +33,7 @@ namespace winrt::LiangWenPeak::implementation
             ::ExitProcess(redirected ? 0U : 1U);
         }
 
-        m_mainWindow = winrt::make_self<MainWindow>(m_stateProfile);
+        m_mainWindow = winrt::make_self<MainWindow>(m_stateProfile, startupLaunch);
         m_window = *m_mainWindow;
         m_window.Activate();
         m_instanceCoordinator.PublishWindow(m_mainWindow->WindowHandle());

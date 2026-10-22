@@ -145,9 +145,13 @@ function Get-TestToastText([string]$AppUserModelId) {
         if ($nodes.Length -lt 2) {
             return $null
         }
+        $images = $notifications[0].Content.GetElementsByTagName('image')
         return [PSCustomObject]@{
             Title = [string]$nodes.Item(0).InnerText
             Body = [string]$nodes.Item(1).InnerText
+            Image = if ($images.Length -gt 0) {
+                [string]$images.Item(0).Attributes.GetNamedItem('src').NodeValue
+            } else { '' }
         }
     } catch {
         return $null
@@ -354,6 +358,14 @@ try {
         throw 'The isolated Toast history did not contain the exact test title and body.'
     }
     Write-Host 'PASS: classic WinRT delivered the exact isolated test title/body to notification history'
+    $expectedIcon = Join-Path (Split-Path -Parent $applicationPath) 'resources\icons\app-64.png'
+    $iconUri = [Uri]$toastText.Image
+    if (-not $iconUri.IsFile -or
+        -not [IO.Path]::GetFullPath($iconUri.LocalPath).Equals(
+            [IO.Path]::GetFullPath($expectedIcon), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Toast does not use the generated static icon in the moved portable payload.'
+    }
+    Write-Host 'PASS: Toast image references the generated static whale-tail PNG'
     $toastSetting = try {
         [string]([Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]::CreateToastNotifier(
                 $profile.AppUserModelId).Setting)

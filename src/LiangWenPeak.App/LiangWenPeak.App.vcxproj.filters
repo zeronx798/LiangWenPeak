@@ -86,6 +86,9 @@
     <ClInclude Include="Services\SettingsService.h">
       <Filter>Services</Filter>
     </ClInclude>
+    <ClInclude Include="Services\TrayService.h">
+      <Filter>Services</Filter>
+    </ClInclude>
     <ClInclude Include="Services\StateProfile.h">
       <Filter>Services</Filter>
     </ClInclude>
@@ -163,6 +166,18 @@
       <Filter>Configuration</Filter>
     </None>
     <Content Include="..\..\resources\pricing-calendar.json">
+      <Filter>Configuration</Filter>
+    </Content>
+    <ResourceCompile Include="..\..\resources\app.rc">
+      <Filter>Configuration</Filter>
+    </ResourceCompile>
+    <Content Include="..\..\resources\icons\app-*.png">
+      <Filter>Configuration</Filter>
+    </Content>
+    <Content Include="..\..\resources\icons\app.ico">
+      <Filter>Configuration</Filter>
+    </Content>
+    <Content Include="..\..\THIRD_PARTY_NOTICES.md">
       <Filter>Configuration</Filter>
     </Content>
   </ItemGroup>

@@ -171,6 +171,9 @@ try {
 
     New-Item -Path $profile.RegistryPath -Force | Out-Null
     $seededRegistryValues = @(
+        @{ Name = 'StartupEnabled'; Type = 'DWord'; Value = 1 },
+        @{ Name = 'StartupHidden'; Type = 'DWord'; Value = 0 },
+        @{ Name = 'MinimizeBehavior'; Type = 'DWord'; Value = 1 },
         @{ Name = 'ApiFeatureEnabled'; Type = 'DWord'; Value = 0 },
         @{ Name = 'BalanceForecastEnabled'; Type = 'DWord'; Value = 1 },
         @{ Name = 'SelectedCurrency'; Type = 'String'; Value = 'USD' },
@@ -194,6 +197,12 @@ try {
             -Value $value.Value `
             -Force | Out-Null
     }
+
+    $startupRunPath = Join-Path $profile.RegistryPath 'StartupRun'
+    $startupRunName = "LiangWenPeak.Test.$($profile.RunId)"
+    New-Item -Path $startupRunPath -Force | Out-Null
+    New-ItemProperty -Path $startupRunPath -Name $startupRunName -PropertyType String `
+        -Value ('"' + $profile.ExpectedLauncherPath + '" --startup') -Force | Out-Null
 
     $fakeApiKey = "TEST_ONLY_DO_NOT_USE_$($profile.RunId)"
     $fakeIdentity = "TEST_ONLY_HISTORY_IDENTITY_$($profile.RunId)"
@@ -460,6 +469,18 @@ try {
         throw 'Cleanup did not rebuild the complete settings UI from central defaults.'
     }
 
+    $startupEnabledBox = Find-TestElement -Root $settings `
+        -Property ([Windows.Automation.AutomationElement]::AutomationIdProperty) -Value 'StartupEnabledBox'
+    $startupHiddenBox = Find-TestElement -Root $settings `
+        -Property ([Windows.Automation.AutomationElement]::AutomationIdProperty) -Value 'StartupHiddenBox' -AllowDisabled
+    if ($startupEnabledBox.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
+            [Windows.Automation.ToggleState]::Off -or
+        $startupHiddenBox.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
+            [Windows.Automation.ToggleState]::On -or $startupHiddenBox.Current.IsEnabled -or
+        (Test-Path -LiteralPath $startupRunPath)) {
+        throw 'Cleanup did not reset startup Draft defaults and remove test startup registration.'
+    }
+
     $save = Find-TestElement `
         -Root $settings `
         -Property ([Windows.Automation.AutomationElement]::AutomationIdProperty) `
@@ -477,7 +498,10 @@ try {
         (Get-ItemPropertyValue -Path $profile.RegistryPath -Name WarningBalances) -match 'USD' -or
         (Get-ItemPropertyValue -Path $profile.RegistryPath -Name NotificationEnabled) -ne 0 -or
         (Get-ItemPropertyValue -Path $profile.RegistryPath -Name NotificationAdvanceEnabled) -ne 1 -or
-        (Get-ItemPropertyValue -Path $profile.RegistryPath -Name NotificationAdvanceMinutes) -ne 10) {
+        (Get-ItemPropertyValue -Path $profile.RegistryPath -Name NotificationAdvanceMinutes) -ne 10 -or
+        (Get-ItemPropertyValue -Path $profile.RegistryPath -Name StartupEnabled) -ne 0 -or
+        (Get-ItemPropertyValue -Path $profile.RegistryPath -Name StartupHidden) -ne 1 -or
+        (Get-ItemPropertyValue -Path $profile.RegistryPath -Name MinimizeBehavior) -ne 0) {
         throw 'Save after cleanup did not persist only the new default Draft.'
     }
     $persistedPropertyNames = @(

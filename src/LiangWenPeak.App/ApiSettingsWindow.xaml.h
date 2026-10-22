@@ -45,6 +45,9 @@ namespace winrt::LiangWenPeak::implementation
         void OnApiKeyPasswordChanged(
             Windows::Foundation::IInspectable const& sender,
             Microsoft::UI::Xaml::RoutedEventArgs const& args);
+        void OnStartupEnabledChanged(
+            Windows::Foundation::IInspectable const& sender,
+            Microsoft::UI::Xaml::RoutedEventArgs const& args);
         void OnClearApiKeyClick(
             Windows::Foundation::IInspectable const& sender,
             Microsoft::UI::Xaml::RoutedEventArgs const& args);

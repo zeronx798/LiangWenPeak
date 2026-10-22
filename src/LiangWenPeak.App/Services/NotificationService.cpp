@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "NotificationService.h"
+#include "DeploymentPathService.h"
 
 namespace
 {
@@ -89,7 +90,7 @@ namespace liangwenpeak::services
                 winrt::hstring{ m_identity.Profile().AppUserModelId() });
             failureContext = L"Windows Toast 内容创建失败";
             auto document = ToastNotificationManager::GetTemplateContent(
-                ToastTemplateType::ToastText02);
+                ToastTemplateType::ToastImageAndText02);
             const auto textNodes = document.GetElementsByTagName(L"text");
             if (textNodes.Length() < 2)
             {
@@ -99,6 +100,13 @@ namespace liangwenpeak::services
             }
             textNodes.Item(0).AppendChild(document.CreateTextNode(title));
             textNodes.Item(1).AppendChild(document.CreateTextNode(body));
+            const auto imagePath = DeploymentPathService{}.ExecutablePath().parent_path()
+                / L"resources" / L"icons" / L"app-64.png";
+            const winrt::Windows::Foundation::Uri imageUri{
+                L"file:///" + imagePath.generic_wstring() };
+            document.GetElementsByTagName(L"image").Item(0)
+                .as<winrt::Windows::Data::Xml::Dom::XmlElement>()
+                .SetAttribute(L"src", imageUri.AbsoluteUri());
 
             ToastNotification notification{ document };
             // Classic desktop Toast requires an in-process activation handler
