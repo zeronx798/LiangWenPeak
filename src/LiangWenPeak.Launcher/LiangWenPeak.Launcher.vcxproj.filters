@@ -10,5 +10,8 @@
     <ClCompile Include="Launcher.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ResourceCompile Include="..\..\resources\app.rc">
+      <Filter>Source Files</Filter>
+    </ResourceCompile>
   </ItemGroup>
 </Project>

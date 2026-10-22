@@ -33,6 +33,8 @@ try {
         }
 
         Write-Host '[TEST] Running native unit tests...'
+        & (Join-Path $context.RepositoryRoot 'tests\LiangWenPeak.Build.Tests\Test-Icons.ps1')
+        if (-not $?) { throw 'ERROR: static icon tests failed.' }
         Invoke-TestExecutable -TestExecutable (Join-Path $context.BuildOutput 'LiangWenPeak.Tests.exe')
 
         Write-Host '[TEST] Running release pipeline negative tests...'

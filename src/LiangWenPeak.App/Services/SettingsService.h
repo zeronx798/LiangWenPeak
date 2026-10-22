@@ -30,8 +30,10 @@ namespace liangwenpeak::services
             notifications::NotificationDeliveryState const& state) const noexcept;
         [[nodiscard]] bool DeleteAllSettings() const noexcept;
         [[nodiscard]] std::wstring const& RegistrySubkey() const noexcept;
+        [[nodiscard]] bool SynchronizeStartup(bool enabled) const noexcept;
 
     private:
         std::wstring m_settingsPath;
+        StateProfile m_profile;
     };
 }

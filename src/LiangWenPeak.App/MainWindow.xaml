@@ -22,6 +22,7 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="32" />
                 <ColumnDefinition Width="32" />
+                <ColumnDefinition Width="32" />
             </Grid.ColumnDefinitions>
 
             <Grid
@@ -114,9 +115,23 @@
                 </Button.Flyout>
             </Button>
 
+            <Button x:Name="MinimizeButton" Grid.Column="2"
+                Click="OnMinimizeClick" AutomationProperties.Name="最小化"
+                ToolTipService.ToolTip="最小化（右键选择本次操作）"
+                Foreground="{StaticResource SecondaryTextBrush}"
+                Style="{StaticResource TitleBarIconButtonStyle}">
+                <FontIcon FontSize="11" Glyph="&#xE921;" />
+                <Button.ContextFlyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem Text="最小化窗口" Click="OnMinimizeWindowClick" />
+                        <MenuFlyoutItem Text="最小化到托盘" Click="OnMinimizeToTrayClick" />
+                    </MenuFlyout>
+                </Button.ContextFlyout>
+            </Button>
+
             <Button
                 x:Name="CloseButton"
-                Grid.Column="2"
+                Grid.Column="3"
                 Click="OnCloseClick"
                 Foreground="{StaticResource SecondaryTextBrush}"
                 Style="{StaticResource TitleBarIconButtonStyle}"

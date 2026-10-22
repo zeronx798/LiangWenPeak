@@ -102,6 +102,24 @@ namespace
     void VerifySettingsTransaction(auto const& expect)
     {
         BalanceSettings persisted;
+        expect(!persisted.startupEnabled && persisted.startupHidden
+            && persisted.minimizeBehavior == liangwenpeak::balance::MinimizeBehavior::Window,
+            "startup defaults off, hidden startup on, and normal minimize");
+        SettingsDraft startupDraft{ persisted, false };
+        startupDraft.Settings().startupEnabled = true;
+        startupDraft.Settings().startupHidden = false;
+        startupDraft.Settings().minimizeBehavior = liangwenpeak::balance::MinimizeBehavior::Tray;
+        expect(!persisted.startupEnabled && persisted.startupHidden,
+            "startup draft does not change persisted settings");
+        startupDraft.Cancel();
+        expect(!startupDraft.Settings().startupEnabled && startupDraft.Settings().startupHidden
+            && startupDraft.Settings().minimizeBehavior == liangwenpeak::balance::MinimizeBehavior::Window,
+            "cancel discards all startup/minimize edits");
+        startupDraft.Settings().startupEnabled = true;
+        startupDraft.Settings().startupHidden = false;
+        startupDraft.Settings().startupEnabled = false;
+        expect(!startupDraft.Settings().startupHidden,
+            "disabling startup retains child draft selection");
         const auto menuIsChecked = [&persisted]()
         {
             return persisted.notifications.enabled;

@@ -277,7 +277,7 @@ namespace
     }
 }
 
-int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR arguments, int)
 {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
 
@@ -326,6 +326,10 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
     }
 
     std::wstring commandLine = L"\"" + applicationPath + L"\"";
+    if (arguments != nullptr && std::wstring_view{ arguments } == L"--startup")
+    {
+        commandLine += L" --startup";
+    }
     std::vector<wchar_t> mutableCommandLine(commandLine.begin(), commandLine.end());
     mutableCommandLine.push_back(L'\0');
 

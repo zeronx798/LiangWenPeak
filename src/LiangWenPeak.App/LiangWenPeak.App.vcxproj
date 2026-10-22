@@ -129,6 +129,7 @@
     <ClInclude Include="Services\NotificationService.h" />
     <ClInclude Include="Services\SettingsService.h" />
     <ClInclude Include="Services\StateProfile.h" />
+    <ClInclude Include="Services\TrayService.h" />
     <ClInclude Include="ViewModels\MainViewModel.h" />
   </ItemGroup>
   <ItemGroup>
@@ -167,6 +168,21 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
+    <ResourceCompile Include="..\..\resources\app.rc">
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Content Include="..\..\resources\icons\app-*.png">
+      <Link>resources\icons\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\resources\icons\app.ico">
+      <Link>resources\icons\app.ico</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\THIRD_PARTY_NOTICES.md">
+      <Link>THIRD_PARTY_NOTICES.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="..\..\resources\pricing-calendar.json">
       <Link>resources\pricing-calendar.json</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

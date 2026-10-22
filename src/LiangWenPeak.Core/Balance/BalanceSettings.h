@@ -38,6 +38,12 @@ namespace liangwenpeak::balance
         std::chrono::hours{ 24 * 30 },
     };
 
+    enum class MinimizeBehavior
+    {
+        Window,
+        Tray,
+    };
+
     struct BalanceSettings
     {
         bool apiFeatureEnabled = true;
@@ -49,6 +55,9 @@ namespace liangwenpeak::balance
         std::map<std::string, DecimalAmount, std::less<>> warningBalances;
         std::vector<std::string> knownCurrencies{ "CNY" };
         notifications::NotificationSettings notifications;
+        bool startupEnabled = false;
+        bool startupHidden = true;
+        MinimizeBehavior minimizeBehavior = MinimizeBehavior::Window;
     };
 
     enum class ApiKeyDraftAction

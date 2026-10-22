@@ -140,6 +140,7 @@ namespace LiangWenPeakUiTests
 }
 
 Add-Type -AssemblyName UIAutomationClient
+$script:ActiveTestProcess = $null
 
 function Get-WindowRectangle([IntPtr]$WindowHandle) {
     $rectangle = [LiangWenPeakUiTests.NativeMethods+Rect]::new()
@@ -156,6 +157,18 @@ function Test-SameRectangle($Left, $Right, [int]$Tolerance = 0) {
         [Math]::Abs($Left.Bottom - $Right.Bottom) -le $Tolerance
 }
 
+function Get-TestAutomationCondition([Windows.Automation.Condition]$Condition) {
+    if ($null -eq $script:ActiveTestProcess -or $script:ActiveTestProcess.HasExited -or
+        -not $TestProfile.OwnedProcessIds.Contains($script:ActiveTestProcess.Id)) {
+        throw 'UI Automation requires a live process owned by this isolated test profile.'
+    }
+    return [Windows.Automation.AndCondition]::new(
+        $Condition,
+        [Windows.Automation.PropertyCondition]::new(
+            [Windows.Automation.AutomationElement]::ProcessIdProperty,
+            $script:ActiveTestProcess.Id))
+}
+
 function Find-ElementByProperty(
     [Windows.Automation.AutomationElement]$Root,
     [Windows.Automation.AutomationProperty]$Property,
@@ -163,6 +176,7 @@ function Find-ElementByProperty(
     [int]$TimeoutMilliseconds = 5000) {
 
     $condition = [Windows.Automation.PropertyCondition]::new($Property, $Value)
+    $condition = Get-TestAutomationCondition $condition
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
         $element = $Root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
@@ -189,6 +203,7 @@ function Find-ElementByNameAndControlType(
         [Windows.Automation.PropertyCondition]::new(
             [Windows.Automation.AutomationElement]::ControlTypeProperty,
             $ControlType))
+    $condition = Get-TestAutomationCondition $condition
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
         $elements = $Root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
@@ -202,6 +217,11 @@ function Find-ElementByNameAndControlType(
 }
 
 function Invoke-AutomationElement([Windows.Automation.AutomationElement]$Element) {
+    if ($null -eq $Element -or $null -eq $script:ActiveTestProcess -or
+        -not $TestProfile.OwnedProcessIds.Contains($script:ActiveTestProcess.Id) -or
+        $Element.Current.ProcessId -ne $script:ActiveTestProcess.Id) {
+        throw 'Refusing to invoke a UI element outside this isolated test process.'
+    }
     $pattern = $Element.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)
     $pattern.Invoke()
 }
@@ -266,6 +286,7 @@ $application = Start-IsolatedTestProcess `
     -Profile $TestProfile `
     -FilePath $applicationPath `
     -WorkingDirectory $applicationDirectory
+$script:ActiveTestProcess = $application
 try {
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {

@@ -45,6 +45,12 @@ try {
         '/v:minimal'
     )
 
+    Write-Host '[ICONS] Generating static icons from the tracked SVG source...'
+    & (Join-Path $PSScriptRoot 'generate-icons.ps1')
+    if (-not $?) {
+        throw 'ERROR: static icon generation failed.'
+    }
+
     Write-Host '[RESTORE] Restoring NuGet and Windows App SDK packages...'
     try {
         Invoke-CheckedProcess `

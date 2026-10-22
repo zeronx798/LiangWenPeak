@@ -2,7 +2,7 @@
 
 ## 1. 概述
 
-LiangWenPeak 是一个非官方 Windows 桌面状态仪表，用北京时间展示 DeepSeek API 的峰谷价格状态、下一次真实价格变化、可选余额，以及基于本地固定采样历史估计的 API 消耗速率和余额触底 ETA。
+LiangWenPeak 是一个 Windows 桌面状态仪表，用北京时间展示 DeepSeek API 的峰谷价格状态、下一次真实价格变化、可选余额，以及基于本地固定采样历史估计的 API 消耗速率和余额触底 ETA。
 
 项目把定价、时间、余额数据模型、历史存储和预测算法放在独立 Core 层；WinUI 3 应用负责窗口、设置、凭据、网络请求和调度；原生 Win32 Launcher 负责从 portable 目录启动当前版本。该边界使核心规则可以脱离 XAML 独立验证。
 
@@ -16,7 +16,7 @@ LiangWenPeak 是一个非官方 Windows 桌面状态仪表，用北京时间展�
 - Windows Credential Locker（PasswordVault）
 - MSBuild、PowerShell 与 NuGet
 
-项目不包含 .NET 业务层、Electron、WebView 或 HTML/CSS 前端。
+业务层使用原生 C++，窗口使用 WinUI 3。
 
 ## 3. 运行时架构
 
@@ -453,20 +453,59 @@ Production/Test 资源映射如下：
 
 `Test-TestIsolation.ps1` 在 release tests 前静态拒绝 production Registry、credential、AUMID、shortcut、registry backup/restore 与 image-name termination pattern。每个运行在 `finally` 中清除本次 GUID 的 Registry、两个 credential、notification history、已验证 shortcut 与 staged root；旁边的 unrelated shortcut 和其它 test/production namespace 不受影响。
 
-## 22. 非目标与明确边界
+余额设置与 About UI 测试的桌面级查找还会合并本次进程的 `ProcessIdProperty` 条件，调用控件前再次校验测试 profile 的 PID ownership；无法确认所属进程时直接失败。隔离审计通过 PowerShell AST 检查这些查找函数仍使用进程筛选，避免同名菜单命中其它运行实例。
 
-当前设计不包含：
+## 22. 启动、最小化与托盘
 
-- Token usage aggregation
-- Web scraping 或 undocumented DeepSeek APIs
-- Chart 或 history viewer
-- History import UI
-- `HistoryIdentitySecret` export/import UI
-- Multiple API key management
-- Auto updater
-- MSIX 或 installer
-- 自建通知服务器、后台常驻服务或第三方通知框架
-- System tray
-- Mica、Acrylic、透明桌面组件或大型 theme/i18n overhaul
+`BalanceSettings` 集中定义 `startupEnabled=false`、`startupHidden=true` 与
+`minimizeBehavior=Window`。三个字段保存在现有 SettingsService Registry subtree，
+随完整 SettingsDraft 复制、保存和取消。静默启动控件只按父开关设置 IsEnabled，
+不会在父开关关闭时重置子选项；最小化默认值独立保存。
+
+保存通过 `SettingsService::SaveBalanceSettings()` 同步当前用户
+[`Run` 注册](https://learn.microsoft.com/windows/win32/setupapi/run-and-runonce-registry-keys)，
+生产 key 为 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，value name 为
+`LiangWenPeak`，command 为带引号的 portable 根 Launcher 路径加
+`--startup`。路径超过 Run 支持的 260 字符上限或注册失败会返回保存失败，
+UI 保持打开并提示，不提交新的自启启用标志。设置写入失败时尝试恢复之前的自启注册和三个新字段。
+“彻底清理”同时移除当前 profile 的自启项。
+
+Launcher 只转发明确的 `--startup`，版本解析、working directory 和 payload 路径维持原规则。
+App 从进程参数识别自启，再走 canonical data root 的 InstanceCoordinator；
+重复启动沿用现有窗口激活通道，后台任务只由主实例持有。仅当参数、自启启用值与静默选项
+同时成立时，首次绘制在解除 DWM cloak 前进入托盘隐藏状态；手动启动正常展示。
+
+窗口状态转换：可见窗口通过原生 `ShowWindow(SW_MINIMIZE)` 进入任务栏最小化；
+托盘操作先成功注册图标，再 `SW_HIDE`。恢复时移除托盘图标、恢复/显示主窗口并请求前台和焦点，
+然后激活已打开的 owned settings window；不保存或修改 always-on-top。
+标题栏右键使用 WinUI ContextFlyout，两个 MenuFlyoutItem 只执行本次动作，不写设置或自启注册。
+关闭按钮与托盘“退出”都关闭窗口、停止 timer，并移除图标。
+
+`TrayService` 使用 Shell_NotifyIcon 和 NOTIFYICON_VERSION_4，处理 NIN_SELECT、NIN_KEYSELECT
+及 WM_CONTEXTMENU，图标以当前 HWND 和 ID 标识；Explorer TaskbarCreated 后重新注册，
+失败则显示主窗口。初次注册失败也保持窗口可见。HICON 与托盘注册均由对象管理生命周期。
+
+自启 integration test 使用 `Software\LiangWenPeak.Tests\<GUID>\StartupRun`，
+不会写真实 Windows Run key；UI 测试只向本次创建的 PID/HWND 发送消息。
+`Test-TrayStartup.ps1` 覆盖默认值、父子选项、草稿取消、保存注册、普通最小化、
+一次性托盘动作、恢复以及从 staged Launcher 发起的登录/手动启动组合。
+
+## 23. 静态应用图标
+
+唯一源为 `resources/icons/running-whale-tail.svg`，由原始 DeepSeek Harness 固定提交
+`e4aa508e35286641ec8d6d8c0e37e3df654056a9` 的 RunningWhaleTail.tsx 中 REST_PATH 导出，
+保留 `0 0 16 16` viewBox、无填充、1 单位描边及 `rgb(82,161,243)`。来源与完整 MIT
+许可见 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)。
+
+`scripts/generate-icons.ps1 -RefreshSource` 从固定提交获取静态路径并重新导出 SVG；
+不带参数时离线读取受版本控制的 SVG，以 Windows System.Drawing 抗锯齿和八倍超采样
+生成 16/20/24/32/40/48/64/128/256 像素透明 PNG，再封装 PNG-backed 多尺寸 ICO。
+脚本对不支持的路径指令 fail closed；重复生成的同一文件 SHA-256 应一致。
+`build.ps1` 在每次 Debug/Release 编译前执行该步骤，`release.ps1` 自动继承。
+
+共享 `resources/app.rc` 将同一 ICO 嵌入 Launcher 与 App。AppWindow.SetIcon 使用导出 ICO；
+TrayService 以 LoadImageW 按窗口 DPI 对应的系统小图标尺寸读取嵌入图标；ToastImageAndText02 使用导出 app-64.png，
+通知 shortcut 的图标指向稳定 Launcher。应用 payload 包含图标和第三方许可，
+打包校验要求这些资源存在。所有导出均为静态图片。
 
 余额统计仅根据官方 balance endpoint 的固定采样变化估计消耗，不代理 API 请求，也不重建 Token 或账单明细。

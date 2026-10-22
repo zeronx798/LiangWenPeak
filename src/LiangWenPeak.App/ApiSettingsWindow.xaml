@@ -202,6 +202,20 @@
                         Text="分钟提醒" />
                 </Grid>
 
+                <TextBlock Margin="0,8,0,0" FontSize="14" FontWeight="SemiBold"
+                    Foreground="{StaticResource SecondaryTextBrush}" Text="启动与最小化" />
+                <Border Height="1" Background="{StaticResource DividerBrush}" />
+                <CheckBox x:Name="StartupEnabledBox" Content="开机自启"
+                    AutomationProperties.Name="开机自启"
+                    Checked="OnStartupEnabledChanged" Unchecked="OnStartupEnabledChanged" />
+                <CheckBox x:Name="StartupHiddenBox" Content="自启动时隐藏主窗口（静默启动）"
+                    AutomationProperties.Name="自启动时隐藏主窗口（静默启动）" />
+                <TextBlock Style="{StaticResource SettingsLabelStyle}" Text="最小化行为" />
+                <RadioButtons x:Name="MinimizeBehaviorBox" MaxColumns="2" AutomationProperties.Name="最小化行为">
+                    <x:String>最小化窗口</x:String>
+                    <x:String>最小化到托盘</x:String>
+                </RadioButtons>
+
                 <Border
                     Margin="0,18,0,0"
                     Padding="12"
@@ -234,28 +248,29 @@
                     </StackPanel>
                 </Border>
 
-                <TextBlock
-                    x:Name="SettingsStatusText"
-                    MinHeight="16"
-                    FontSize="11"
-                    Foreground="{StaticResource TertiaryTextBrush}"
-                    TextWrapping="Wrap" />
             </StackPanel>
         </ScrollViewer>
 
         <Grid Grid.Row="1" Margin="0,14,0,0" ColumnSpacing="8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
-            <Button
+            <TextBlock x:Name="SettingsStatusText" Grid.ColumnSpan="3"
+                FontSize="11" Foreground="{StaticResource TertiaryTextBrush}"
+                TextWrapping="Wrap" />
+            <Button Grid.Row="1"
                 x:Name="ResetStatisticsButton"
                 HorizontalAlignment="Left"
                 AutomationProperties.Name="重新开始统计"
                 Click="OnResetStatisticsClick"
                 Content="重新开始统计" />
-            <Button
+            <Button Grid.Row="1"
                 x:Name="SaveButton"
                 Grid.Column="1"
                 MinWidth="64"
@@ -263,7 +278,7 @@
                 Click="OnSaveClick"
                 Content="保存"
                 Style="{StaticResource AccentButtonStyle}" />
-            <Button
+            <Button Grid.Row="1"
                 x:Name="CancelButton"
                 Grid.Column="2"
                 MinWidth="64"

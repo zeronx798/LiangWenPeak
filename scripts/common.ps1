@@ -530,6 +530,9 @@ function Assert-PackageBuildOutputs {
         (Join-Path $Context.BuildOutput 'LiangWenPeak.exe'),
         (Join-Path $Context.BuildOutput 'LiangWenPeak.App.exe'),
         (Join-Path $Context.BuildOutput 'resources\pricing-calendar.json'),
+        (Join-Path $Context.BuildOutput 'resources\icons\app.ico'),
+        (Join-Path $Context.BuildOutput 'resources\icons\app-64.png'),
+        (Join-Path $Context.BuildOutput 'THIRD_PARTY_NOTICES.md'),
         (Join-Path $Context.BuildOutput 'App.xbf'),
         (Join-Path $Context.BuildOutput 'ApiSettingsWindow.xbf'),
         (Join-Path $Context.BuildOutput 'MainWindow.xbf'),
@@ -586,6 +589,9 @@ function Assert-PortablePackage {
         (Join-Path $applicationDirectory 'MainWindow.xbf'),
         (Join-Path $applicationDirectory 'LiangWenPeak.App.pri'),
         (Join-Path $applicationDirectory 'resources\pricing-calendar.json'),
+        (Join-Path $applicationDirectory 'resources\icons\app.ico'),
+        (Join-Path $applicationDirectory 'resources\icons\app-64.png'),
+        (Join-Path $applicationDirectory 'THIRD_PARTY_NOTICES.md'),
         (Join-Path $applicationDirectory 'Microsoft.WindowsAppRuntime.dll'),
         (Join-Path $applicationDirectory 'Microsoft.ui.xaml.dll')
     )
@@ -733,14 +739,16 @@ function Start-IsolatedPortableApplication {
         [Parameter(Mandatory)]$Profile,
         [Parameter(Mandatory)][string]$LauncherPath,
         [Parameter(Mandatory)][string]$ExpectedApplicationPath,
-        [Parameter(Mandatory)][string]$WorkingDirectory
+        [Parameter(Mandatory)][string]$WorkingDirectory,
+        [string]$Arguments = ''
     )
 
     $expectedPath = [IO.Path]::GetFullPath($ExpectedApplicationPath)
     $launcher = Start-IsolatedTestProcess `
         -Profile $Profile `
         -FilePath $LauncherPath `
-        -WorkingDirectory $WorkingDirectory
+        -WorkingDirectory $WorkingDirectory `
+        -Arguments $Arguments
     $childProcessId = $null
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {

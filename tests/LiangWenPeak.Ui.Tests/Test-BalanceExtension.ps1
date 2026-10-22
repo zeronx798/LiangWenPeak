@@ -280,6 +280,7 @@ namespace LiangWenPeakBalanceUiTests
 }
 
 Add-Type -AssemblyName UIAutomationClient
+$script:ActiveTestProcess = $null
 
 $apiBalanceLabel = 'API ' + [char]0x4F59 + [char]0x989D
 $apiBurnLabel = 'API ' + [char]0x6D88 + [char]0x8017
@@ -345,6 +346,18 @@ function Test-SameRectangle($Left, $Right) {
         $Left.Bottom -eq $Right.Bottom
 }
 
+function Get-TestAutomationCondition([Windows.Automation.Condition]$Condition) {
+    if ($null -eq $script:ActiveTestProcess -or $script:ActiveTestProcess.HasExited -or
+        -not $TestProfile.OwnedProcessIds.Contains($script:ActiveTestProcess.Id)) {
+        throw 'UI Automation requires a live process owned by this isolated test profile.'
+    }
+    return [Windows.Automation.AndCondition]::new(
+        $Condition,
+        [Windows.Automation.PropertyCondition]::new(
+            [Windows.Automation.AutomationElement]::ProcessIdProperty,
+            $script:ActiveTestProcess.Id))
+}
+
 function Find-Element(
     [Windows.Automation.AutomationElement]$Root,
     [Windows.Automation.AutomationProperty]$Property,
@@ -352,6 +365,7 @@ function Find-Element(
     [int]$TimeoutMilliseconds = 5000) {
 
     $condition = [Windows.Automation.PropertyCondition]::new($Property, $Value)
+    $condition = Get-TestAutomationCondition $condition
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
         $element = $Root.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
@@ -364,6 +378,11 @@ function Find-Element(
 }
 
 function Invoke-Element([Windows.Automation.AutomationElement]$Element) {
+    if ($null -eq $Element -or $null -eq $script:ActiveTestProcess -or
+        -not $TestProfile.OwnedProcessIds.Contains($script:ActiveTestProcess.Id) -or
+        $Element.Current.ProcessId -ne $script:ActiveTestProcess.Id) {
+        throw 'Refusing to invoke a UI element outside this isolated test process.'
+    }
     $pattern = $Element.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)
     $pattern.Invoke()
 }
@@ -376,6 +395,7 @@ function Find-InvokableElementByName(
     $condition = [Windows.Automation.PropertyCondition]::new(
         [Windows.Automation.AutomationElement]::NameProperty,
         $Name)
+    $condition = Get-TestAutomationCondition $condition
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
         $elements = $Root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
@@ -412,6 +432,7 @@ function Find-ToggleElementByName(
     $condition = [Windows.Automation.PropertyCondition]::new(
         [Windows.Automation.AutomationElement]::NameProperty,
         $Name)
+    $condition = Get-TestAutomationCondition $condition
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
         $elements = $Root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
@@ -439,6 +460,7 @@ function Find-WindowByName([string]$Name, [int]$TimeoutMilliseconds = 5000) {
         [Windows.Automation.PropertyCondition]::new(
             [Windows.Automation.AutomationElement]::ControlTypeProperty,
             [Windows.Automation.ControlType]::Window))
+    $condition = Get-TestAutomationCondition $condition
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
         $window = [Windows.Automation.AutomationElement]::RootElement.FindFirst(
@@ -460,6 +482,7 @@ function Find-ToggleElementByAutomationId(
     $condition = [Windows.Automation.PropertyCondition]::new(
         [Windows.Automation.AutomationElement]::AutomationIdProperty,
         $AutomationId)
+    $condition = Get-TestAutomationCondition $condition
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
         $elements = $Root.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
@@ -585,6 +608,7 @@ function Start-TestApplication([string]$ApplicationPath, [string]$WorkingDirecto
         -Profile $TestProfile `
         -FilePath $ApplicationPath `
         -WorkingDirectory $WorkingDirectory
+    $script:ActiveTestProcess = $process
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
         Start-Sleep -Milliseconds 100
@@ -1293,8 +1317,19 @@ try {
                 [Windows.Automation.AutomationElement]::NameProperty,
                 $cancelLabel))
         $confirmationCancelled = $false
+        # The title can enter UIA before ContentDialog's template buttons.
+        # Wait for the native template ID rather than taking one name snapshot.
+        $dialogCancel = Find-Element $settingsWindow `
+            ([Windows.Automation.AutomationElement]::AutomationIdProperty) 'CloseButton'
+        $dialogCancelPattern = $null
+        if ($null -ne $dialogCancel -and $dialogCancel.Current.IsEnabled -and
+            $dialogCancel.TryGetCurrentPattern(
+                [Windows.Automation.InvokePattern]::Pattern, [ref]$dialogCancelPattern)) {
+            $dialogCancelPattern.Invoke()
+            $confirmationCancelled = $true
+        }
         $offscreenCancel = $null
-        for ($index = 0; $index -lt $cancelButtons.Count; ++$index) {
+        for ($index = 0; $index -lt $cancelButtons.Count -and -not $confirmationCancelled; ++$index) {
             $candidate = $cancelButtons.Item($index)
             $invokePattern = $null
             if ($candidate.Current.AutomationId -ne 'CancelButton' -and

@@ -28,6 +28,7 @@
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shcore.lib")
+#pragma comment(lib, "shell32.lib")
 
 namespace winrt::LiangWenPeak::implementation
 {
@@ -125,7 +126,7 @@ namespace winrt::LiangWenPeak::implementation
     {
     }
 
-    MainWindow::MainWindow(liangwenpeak::services::StateProfile profile)
+    MainWindow::MainWindow(liangwenpeak::services::StateProfile profile, bool const startupLaunch)
         : m_stateProfile(std::move(profile)),
           m_deploymentPaths(m_stateProfile),
           m_credentialService(
@@ -158,6 +159,8 @@ namespace winrt::LiangWenPeak::implementation
         m_notificationDeliveryState = m_settingsService->LoadNotificationDeliveryState();
         static_cast<void>(m_notificationService.Initialize());
         m_viewModel->Initialize();
+        m_silentStartup = startupLaunch && m_viewModel->Settings().startupEnabled
+            && m_viewModel->Settings().startupHidden;
         if (m_viewModel->Settings().notifications.enabled)
         {
             static_cast<void>(m_notificationService.EnsureIdentity());
@@ -345,15 +348,65 @@ namespace winrt::LiangWenPeak::implementation
         Close();
     }
 
+    void MainWindow::OnMinimizeClick(IInspectable const&, RoutedEventArgs const&)
+    {
+        Minimize(m_viewModel->Settings().minimizeBehavior
+            == liangwenpeak::balance::MinimizeBehavior::Tray);
+    }
+
+    void MainWindow::OnMinimizeWindowClick(IInspectable const&, RoutedEventArgs const&)
+    {
+        Minimize(false);
+    }
+
+    void MainWindow::OnMinimizeToTrayClick(IInspectable const&, RoutedEventArgs const&)
+    {
+        Minimize(true);
+    }
+
+    void MainWindow::Minimize(bool const toTray) noexcept
+    {
+        if (m_closing) return;
+        if (!toTray)
+        {
+            m_trayService.Remove();
+            static_cast<void>(::ShowWindow(m_windowHandle, SW_MINIMIZE));
+        }
+        else if (m_trayService.Show(m_windowHandle))
+        {
+            static_cast<void>(::ShowWindow(m_windowHandle, SW_HIDE));
+        }
+        else
+        {
+            // A visible window is the recovery path when Shell integration fails.
+            ActivateFromSecondaryLaunch();
+        }
+    }
+
+    void MainWindow::ShowTrayMenu() noexcept
+    {
+        const auto menu = ::CreatePopupMenu();
+        if (!menu) return;
+        ::AppendMenuW(menu, MF_STRING, 1, L"打开主窗口");
+        ::AppendMenuW(menu, MF_STRING, 2, L"退出");
+        POINT point{};
+        ::GetCursorPos(&point);
+        ::SetForegroundWindow(m_windowHandle);
+        const auto selected = ::TrackPopupMenu(menu,
+            TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+            point.x, point.y, 0, m_windowHandle, nullptr);
+        ::DestroyMenu(menu);
+        ::PostMessageW(m_windowHandle, WM_NULL, 0, 0);
+        if (selected == 1) ActivateFromSecondaryLaunch();
+        if (selected == 2) Close();
+    }
+
     void MainWindow::ActivateFromSecondaryLaunch() noexcept
     {
         try
         {
-            if (m_settingsWindow)
-            {
-                m_settingsWindow->ShowOwned();
-                return;
-            }
+            m_silentStartup = false;
+            m_trayService.Remove();
             if (m_windowHandle == nullptr || !::IsWindow(m_windowHandle))
             {
                 return;
@@ -379,6 +432,10 @@ namespace winrt::LiangWenPeak::implementation
             static_cast<void>(::BringWindowToTop(m_windowHandle));
             static_cast<void>(::SetForegroundWindow(m_windowHandle));
             static_cast<void>(::SetFocus(m_windowHandle));
+            if (m_settingsWindow)
+            {
+                m_settingsWindow->ShowOwned();
+            }
         }
         catch (...)
         {
@@ -390,10 +447,12 @@ namespace winrt::LiangWenPeak::implementation
     {
         m_appWindow = AppWindow();
         m_appWindow.Title(L"\u6881\u6587\u5cf0\u65f6\u949f");
+        m_appWindow.SetIcon((m_deploymentPaths.ExecutablePath().parent_path()
+            / L"resources" / L"icons" / L"app.ico").wstring());
         m_presenter = m_appWindow.Presenter().as<OverlappedPresenter>();
         m_presenter.IsResizable(false);
         m_presenter.IsMaximizable(false);
-        m_presenter.IsMinimizable(false);
+        m_presenter.IsMinimizable(true);
         m_presenter.SetBorderAndTitleBar(true, false);
 
         ExtendsContentIntoTitleBar(true);
@@ -408,6 +467,7 @@ namespace winrt::LiangWenPeak::implementation
             1,
             reinterpret_cast<DWORD_PTR>(this)));
         m_activationSubclassAttached = true;
+        m_taskbarCreatedMessage = ::RegisterWindowMessageW(L"TaskbarCreated");
 
         m_closingToken = m_appWindow.Closing({ this, &MainWindow::OnWindowClosing });
     }
@@ -422,6 +482,9 @@ namespace winrt::LiangWenPeak::implementation
         m_themeManager.ApplyToWindow(RootGrid(), m_windowHandle);
         liangwenpeak::apptheme::ThemeManager::ApplyControlPresentation(
             MoreButton(),
+            enabled);
+        liangwenpeak::apptheme::ThemeManager::ApplyControlPresentation(
+            MinimizeButton(),
             enabled);
         liangwenpeak::apptheme::ThemeManager::ApplyControlPresentation(
             CloseButton(),
@@ -467,6 +530,11 @@ namespace winrt::LiangWenPeak::implementation
         }
 
         ::DwmFlush();
+        if (m_silentStartup)
+        {
+            m_silentStartup = false;
+            Minimize(true);
+        }
         const BOOL cloak = FALSE;
         ::DwmSetWindowAttribute(m_windowHandle, DWMWA_CLOAK, &cloak, sizeof(cloak));
         m_startupCloaked = false;
@@ -1011,6 +1079,7 @@ namespace winrt::LiangWenPeak::implementation
         Microsoft::UI::Windowing::AppWindowClosingEventArgs const&)
     {
         m_closing = true;
+        m_trayService.Remove();
         if (m_settingsWindow)
         {
             m_settingsWindow->CloseFromOwner();
@@ -1059,9 +1128,31 @@ namespace winrt::LiangWenPeak::implementation
         DWORD_PTR const referenceData)
     {
         static_cast<void>(subclassId);
+        auto const window = reinterpret_cast<MainWindow*>(referenceData);
+        if (window && message == liangwenpeak::services::TrayService::CallbackMessage)
+        {
+            const auto action = LOWORD(lParam);
+            if (action == NIN_SELECT || action == NIN_KEYSELECT)
+            {
+                window->ActivateFromSecondaryLaunch();
+            }
+            else if (action == WM_CONTEXTMENU)
+            {
+                window->ShowTrayMenu();
+            }
+            return 0;
+        }
+        if (window && window->m_taskbarCreatedMessage != 0
+            && message == window->m_taskbarCreatedMessage)
+        {
+            if (!window->m_trayService.RecoverAfterExplorerRestart())
+            {
+                window->ActivateFromSecondaryLaunch();
+            }
+            return 0;
+        }
         if (message == liangwenpeak::services::InstanceCoordinator::ActivationMessage())
         {
-            auto const window = reinterpret_cast<MainWindow*>(referenceData);
             if (window != nullptr)
             {
                 window->ActivateFromSecondaryLaunch();
